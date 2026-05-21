@@ -16,20 +16,18 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-auditscan}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-auditscan_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-auditscan_db}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - auditscan_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auditscan} -d ${POSTGRES_DB:-auditscan_db}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    ports:
-      - "5432:5432"
 
   # ------------------------------------------------------------------ #
   #  Redis                                                               #
@@ -47,17 +45,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    ports:
-      - "6379:6379"
 
   # ------------------------------------------------------------------ #
   #  Nmap sidecar                                                        #
   # ------------------------------------------------------------------ #
   nmap:
-    build:
-      context: ./nmap
-      dockerfile: Dockerfile
-    image: auditscan-nmap:latest
+    image: ghcr.io/${REGISTRY_OWNER}/auditscan-nmap:${IMAGE_TAG:-latest}
     restart: unless-stopped
     networks:
       - auditscan_net
@@ -66,15 +59,13 @@ services:
   #  Backend API                                                         #
   # ------------------------------------------------------------------ #
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/${REGISTRY_OWNER}/auditscan-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://auditscan:auditscan_secret@postgres:5432/auditscan_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,7 +76,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -97,16 +87,14 @@ services:
   #  Celery Worker                                                       #
   # ------------------------------------------------------------------ #
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/${REGISTRY_OWNER}/auditscan-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://auditscan:auditscan_secret@postgres:5432/auditscan_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,16 +105,13 @@ services:
     networks:
       - auditscan_net
     volumes:
-      - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock
 
   # ------------------------------------------------------------------ #
   #  Frontend                                                            #
   # ------------------------------------------------------------------ #
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/${REGISTRY_OWNER}/auditscan-frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file:
       - .env
