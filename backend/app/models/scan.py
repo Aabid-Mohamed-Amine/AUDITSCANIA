@@ -3,7 +3,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, Integer, Text, DateTime, Enum as SAEnum, JSON, Uuid,
+    Column, String, Integer, Text, DateTime, Enum as SAEnum, JSON, Uuid, ForeignKey,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -23,6 +23,12 @@ class Scan(Base):
         Uuid(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+        index=True,
+    )
+    user_id = Column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
         index=True,
     )
     target = Column(String(255), nullable=False, index=True)
@@ -47,6 +53,8 @@ class Scan(Base):
     virustotal_data = Column(JSON, nullable=True)
     abuseipdb_data = Column(JSON, nullable=True)
     nmap_data = Column(JSON, nullable=True)
+    nuclei_data = Column(JSON, nullable=True)
+    zap_data = Column(JSON, nullable=True)
 
     # AI analysis
     ai_analysis = Column(Text, nullable=True)
@@ -59,6 +67,7 @@ class Scan(Base):
 
     recon_result = relationship("ReconnaissanceResult", back_populates="scan", uselist=False, passive_deletes=True)
     logs = relationship("ScanLog", back_populates="scan", order_by="ScanLog.created_at", passive_deletes=True)
+    step_results = relationship("ScanStepResult", back_populates="scan", passive_deletes=True)
 
     def __repr__(self) -> str:
         return f"<Scan id={self.id} target={self.target} status={self.status}>"

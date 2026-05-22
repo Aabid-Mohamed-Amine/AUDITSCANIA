@@ -7,30 +7,17 @@ For domain targets, DNS resolves asynchronously first then queries the resulting
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import socket
 from typing import Any, Dict
 
 import httpx
 
 from app.config import settings
-from app.utils.net import is_ip, extract_hostname
+from app.utils.net import resolve_hostname
 
 logger = logging.getLogger(__name__)
 
 ABUSEIPDB_BASE = "https://api.abuseipdb.com/api/v2"
-
-
-async def _resolve(target: str) -> str:
-    """Resolve hostname to IP asynchronously (non-blocking)."""
-    if is_ip(target):
-        return target
-    loop = asyncio.get_running_loop()
-    return await asyncio.wait_for(
-        loop.run_in_executor(None, socket.gethostbyname, extract_hostname(target)),
-        timeout=10,
-    )
 
 
 async def query_abuseipdb(target: str) -> Dict[str, Any]:
@@ -42,7 +29,7 @@ async def query_abuseipdb(target: str) -> Dict[str, Any]:
         return result
 
     try:
-        ip = await _resolve(target)
+        ip = await resolve_hostname(target)
         result["resolved_ip"] = ip
     except Exception as exc:
         result["error"] = f"DNS resolution failed: {exc}"

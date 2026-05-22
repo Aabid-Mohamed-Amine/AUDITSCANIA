@@ -8,8 +8,6 @@ FastAPI subscribes and forwards to connected browsers.
 Authentication: JWT token must be passed as ?token=<jwt> query parameter.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging

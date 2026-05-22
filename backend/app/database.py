@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.config import settings
 
@@ -28,5 +28,5 @@ def get_db():
 
 def create_tables():
     """Create all tables on startup."""
-    from app.models import scan, user, recon_result, log  # noqa: F401
+    from app.models import scan, user, recon_result, log, step_result  # noqa: F401
     Base.metadata.create_all(bind=engine)

@@ -8,11 +8,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
+from app.core.limiter import limiter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,11 +33,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # ---------- Startup ----------
     logger.info("Starting AuditScan IA backend…")
-
-    # Create DB tables
-    from app.database import create_tables
-    create_tables()
-    logger.info("Database tables ready")
 
     # Start the Redis → WebSocket listener as a background task
     from app.api.websocket import _redis_listener
@@ -64,14 +62,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # ---- CORS ----
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:3000", "http://localhost:3001"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# ---- Global exception handler (ensures CORS headers on 500) ----
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 # ---- Routes ----
 from app.api.router import api_router  # noqa: E402

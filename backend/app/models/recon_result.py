@@ -17,11 +17,15 @@ class ReconnaissanceResult(Base):
     virustotal_data = Column(JSON, nullable=True)
     abuseipdb_data = Column(JSON, nullable=True)
     nmap_data = Column(JSON, nullable=True)
+    nuclei_data = Column(JSON, nullable=True)
+    zap_data = Column(JSON, nullable=True)
 
     risk_score = Column(Integer, nullable=True)
     abuseipdb_score = Column(Float, nullable=True)
     virustotal_score = Column(Float, nullable=True)
     port_exposure_score = Column(Float, nullable=True)
+    nuclei_score = Column(Float, nullable=True)
+    zap_score = Column(Float, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

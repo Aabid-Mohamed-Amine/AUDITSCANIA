@@ -40,7 +40,63 @@ def test_login_success(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "access_token" in data
+    assert "refresh_token" in data
     assert data["token_type"] == "bearer"
+
+
+def test_refresh_token(client):
+    client.post("/api/auth/register", json={
+        "email": "refresh@example.com",
+        "password": "password123",
+    })
+    tokens = client.post("/api/auth/login", json={
+        "email": "refresh@example.com",
+        "password": "password123",
+    }).json()
+
+    resp = client.post("/api/auth/refresh", json={
+        "refresh_token": tokens["refresh_token"],
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "access_token" in data
+    assert "refresh_token" in data
+    # Rotated — new refresh token must differ from the old one
+    assert data["refresh_token"] != tokens["refresh_token"]
+
+
+def test_refresh_token_rotation_rejects_old(client):
+    """A consumed refresh token cannot be reused (rotation + blacklist)."""
+    client.post("/api/auth/register", json={
+        "email": "rotation@example.com",
+        "password": "password123",
+    })
+    tokens = client.post("/api/auth/login", json={
+        "email": "rotation@example.com",
+        "password": "password123",
+    }).json()
+
+    # First use — OK
+    client.post("/api/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    # Second use of the same refresh token — must be rejected
+    resp = client.post("/api/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert resp.status_code == 401
+
+
+def test_access_token_rejected_as_refresh(client):
+    client.post("/api/auth/register", json={
+        "email": "wrongtype@example.com",
+        "password": "password123",
+    })
+    tokens = client.post("/api/auth/login", json={
+        "email": "wrongtype@example.com",
+        "password": "password123",
+    }).json()
+
+    resp = client.post("/api/auth/refresh", json={
+        "refresh_token": tokens["access_token"],
+    })
+    assert resp.status_code == 401
 
 
 def test_login_wrong_password(client):

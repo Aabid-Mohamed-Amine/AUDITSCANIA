@@ -74,6 +74,8 @@ class ScanResponse(BaseModel):
     virustotal_data: Optional[Dict[str, Any]] = None
     abuseipdb_data: Optional[Dict[str, Any]] = None
     nmap_data: Optional[Dict[str, Any]] = None
+    nuclei_data: Optional[Dict[str, Any]] = None
+    zap_data: Optional[Dict[str, Any]] = None
     ai_analysis: Optional[str] = None
     error_message: Optional[str] = None
 

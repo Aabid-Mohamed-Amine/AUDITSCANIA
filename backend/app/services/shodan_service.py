@@ -7,28 +7,15 @@ Falls back gracefully when the API key is missing or the target is a domain.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import socket
 from typing import Any, Dict
 
 import httpx
 
 from app.config import settings
-from app.utils.net import is_ip, extract_hostname
+from app.utils.net import resolve_hostname
 
 logger = logging.getLogger(__name__)
-
-
-async def _resolve_to_ip(target: str) -> str:
-    """Return the IPv4 address for target (already an IP or a hostname)."""
-    if is_ip(target):
-        return target
-    loop = asyncio.get_running_loop()
-    return await asyncio.wait_for(
-        loop.run_in_executor(None, socket.gethostbyname, extract_hostname(target)),
-        timeout=10,
-    )
 
 
 async def query_shodan(target: str) -> Dict[str, Any]:
@@ -42,7 +29,7 @@ async def query_shodan(target: str) -> Dict[str, Any]:
         logger.warning("SHODAN_API_KEY not set – using InternetDB (limited data)")
 
     try:
-        ip = await _resolve_to_ip(target)
+        ip = await resolve_hostname(target)
         result["resolved_ip"] = ip
     except Exception as exc:
         result["error"] = f"DNS resolution failed: {exc}"

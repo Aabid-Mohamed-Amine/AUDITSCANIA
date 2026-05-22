@@ -9,6 +9,7 @@ os.environ.setdefault("SECRET_KEY", "ci-test-secret-key-not-for-production")
 os.environ.setdefault("SHODAN_API_KEY", "dummy")
 os.environ.setdefault("VIRUSTOTAL_API_KEY", "dummy")
 os.environ.setdefault("ABUSEIPDB_API_KEY", "dummy")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # disable rate limiting in tests
 
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
