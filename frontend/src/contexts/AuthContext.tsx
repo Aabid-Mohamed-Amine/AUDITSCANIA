@@ -1,35 +1,37 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { authApi, type User } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { authApi, tokenStore, type User } from "@/lib/api";
 
 interface AuthContextValue {
   user: User | null;
   token: string | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  isAuthenticated: boolean;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
-  isAuthenticated: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const TOKEN_KEY = "auditscan_token";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
 
+  // Restore session on mount
   useEffect(() => {
-    const stored = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+    const stored = tokenStore.getAccess();
     if (stored) {
       setToken(stored);
-      authApi.me(stored)
+      authApi
+        .me(stored)
         .then(setUser)
         .catch(() => {
-          localStorage.removeItem(TOKEN_KEY);
+          tokenStore.clear();
           setToken(null);
         })
         .finally(() => setIsLoading(false));
@@ -38,9 +40,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const { access_token } = await authApi.login(email, password);
-    localStorage.setItem(TOKEN_KEY, access_token);
+  const login = async (email: string, password: string, rememberMe = false) => {
+    // Set persistence preference BEFORE storing tokens so _store() picks the right storage
+    tokenStore.setRemember(rememberMe);
+    const { access_token, refresh_token } = await authApi.login(email, password);
+    tokenStore.set(access_token, refresh_token);
     setToken(access_token);
     const me = await authApi.me(access_token);
     setUser(me);
@@ -48,17 +52,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (email: string, password: string) => {
     await authApi.register(email, password);
-    await login(email, password);
   };
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
+    const currentToken = token;
+    const currentRefresh = tokenStore.getRefresh();
+    if (currentToken) {
+      // Fire-and-forget — local cleanup always happens regardless
+      authApi.logout(currentToken, currentRefresh).catch(() => {});
+    }
+    tokenStore.clear();
     setToken(null);
     setUser(null);
+    queryClient.clear();
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider
+      value={{ user, token, isLoading, isAuthenticated: !!user, login, register, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );

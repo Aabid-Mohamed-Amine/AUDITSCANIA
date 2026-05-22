@@ -1,8 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { scansApi } from "@/lib/api";
+import { useScans } from "@/hooks/useScans";
 import { useAuth } from "@/contexts/AuthContext";
 import RiskScore from "@/components/RiskScore";
 import RiskChart from "@/components/charts/RiskChart";
@@ -43,11 +42,7 @@ const statusColor: Record<string, string> = {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const { data, isLoading } = useQuery({
-    queryKey: ["scans"],
-    queryFn: () => scansApi.list(0, 100),
-    refetchInterval: 5000,
-  });
+  const { data, isLoading } = useScans(0, 100);
 
   const scans = data?.items ?? [];
   const total = data?.total ?? 0;

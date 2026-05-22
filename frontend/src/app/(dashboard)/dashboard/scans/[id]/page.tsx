@@ -11,12 +11,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft, RefreshCw, AlertTriangle, ShieldAlert,
-  Brain, Terminal, CheckCircle2, XCircle, Clock, Shield, RotateCcw
+  Brain, Terminal, CheckCircle2, XCircle, Clock, Shield, RotateCcw,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
+import type { Scan } from "@/lib/api";
 
 interface PageProps {
   params: { id: string };
+}
+
+function hasAnyResults(scan: Scan): boolean {
+  return !!(
+    scan.shodan_data ||
+    scan.virustotal_data ||
+    scan.abuseipdb_data ||
+    scan.nmap_data ||
+    scan.nuclei_data ||
+    scan.zap_data
+  );
 }
 
 export default function ScanDetailPage({ params }: PageProps) {
@@ -28,7 +40,7 @@ export default function ScanDetailPage({ params }: PageProps) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-4">
         <RefreshCw className="h-8 w-8 text-cyan-400 animate-spin" />
-        <p className="text-sm text-slate-500 font-medium animate-pulse">Loading scan report...</p>
+        <p className="text-sm text-slate-500 font-medium animate-pulse">Loading scan report…</p>
       </div>
     );
   }
@@ -41,7 +53,8 @@ export default function ScanDetailPage({ params }: PageProps) {
         </div>
         <h1 className="text-xl font-bold text-slate-200">Scan Report Not Found</h1>
         <p className="text-sm text-slate-500 mt-2">
-          {error?.message || "We could not find the requested security scan report. It might have been deleted."}
+          {error?.message ||
+            "We could not find the requested security scan report. It might have been deleted."}
         </p>
         <Link
           href="/dashboard"
@@ -54,13 +67,15 @@ export default function ScanDetailPage({ params }: PageProps) {
     );
   }
 
-  const isRunning = scan.status === "running" || scan.status === "pending";
+  const isRunning  = scan.status === "running" || scan.status === "pending";
   const isCompleted = scan.status === "completed";
-  const isFailed = scan.status === "failed";
+  const isFailed   = scan.status === "failed";
+  const showResults = isCompleted || (isRunning && hasAnyResults(scan));
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header Navigation */}
+
+      {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="space-y-1">
           <Link
@@ -74,11 +89,11 @@ export default function ScanDetailPage({ params }: PageProps) {
             <h1 className="text-xl font-bold text-slate-100 font-mono tracking-tight truncate max-w-md">
               {scan.target}
             </h1>
-            <Badge 
+            <Badge
               variant={
-                scan.status === "completed" ? "success" : 
-                scan.status === "failed" ? "danger" : 
-                scan.status === "running" ? "info" : "warning"
+                scan.status === "completed" ? "success" :
+                scan.status === "failed"    ? "danger"  :
+                scan.status === "running"   ? "info"    : "warning"
               }
               className="capitalize"
             >
@@ -86,7 +101,8 @@ export default function ScanDetailPage({ params }: PageProps) {
             </Badge>
           </div>
           <p className="text-xs text-slate-500">
-            Started: {formatDate(scan.created_at)} • ID: <span className="font-mono">{scan.id}</span>
+            Started: {formatDate(scan.created_at)} · ID:{" "}
+            <span className="font-mono">{scan.id}</span>
           </p>
         </div>
 
@@ -116,52 +132,62 @@ export default function ScanDetailPage({ params }: PageProps) {
         </div>
       </div>
 
-      {/* Main Grid Layout */}
+      {/* ── Main grid ── */}
       <div className="grid lg:grid-cols-3 gap-6">
-        
-        {/* Left Side: Scan state & logs & AI report */}
+
+        {/* Left column */}
         <div className="lg:col-span-2 space-y-6">
-          
-          {/* Active scan progress tracker */}
+
+          {/* Progress tracker — running / pending */}
           {isRunning && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
               <h2 className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
                 <Clock className="h-4 w-4 text-cyan-400 animate-spin" />
-                Live Scan Progress
+                Live Scan Pipeline
               </h2>
-              <ProgressTracker 
-                progress={scan.progress} 
-                status={scan.status} 
-                message={scan.error_message || undefined} 
+              <ProgressTracker
+                progress={scan.progress}
+                status={scan.status}
+                message={scan.error_message || undefined}
               />
             </div>
           )}
 
-          {/* Failed State Card */}
+          {/* Failed banner */}
           {isFailed && (
             <div className="bg-red-950/20 border border-red-500/20 rounded-xl p-5 flex items-start gap-4">
               <XCircle className="h-8 w-8 text-red-500 flex-shrink-0" />
               <div>
                 <h3 className="font-bold text-red-400">Scan Operation Failed</h3>
                 <p className="text-xs text-red-300/80 mt-1">
-                  {scan.error_message || "An unexpected error occurred during execution. Please check the logs below for more details."}
+                  {scan.error_message ||
+                    "An unexpected error occurred during execution. Check the logs below for details."}
                 </p>
               </div>
             </div>
           )}
 
-          {/* Results Tab Panel */}
-          {isCompleted && (
+          {/* Results panel — shown when complete or when partial data is available during run */}
+          {showResults && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-                <Shield className="h-5 w-5 text-green-400" />
-                <h2 className="font-bold text-slate-200">Reconnaissance Findings</h2>
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-green-400" />
+                  <h2 className="font-bold text-slate-200">
+                    {isCompleted ? "Reconnaissance Findings" : "Partial Results"}
+                  </h2>
+                </div>
+                {isRunning && (
+                  <Badge variant="info" className="text-xs animate-pulse">
+                    Live
+                  </Badge>
+                )}
               </div>
               <ScanResults scan={scan} />
             </div>
           )}
 
-          {/* Live / Session Logs */}
+          {/* Logs */}
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
               <Terminal className="h-4 w-4 text-slate-400" />
@@ -169,29 +195,75 @@ export default function ScanDetailPage({ params }: PageProps) {
             </h2>
             <LiveLogs logs={scan.logs ?? []} isLive={isRunning} />
           </div>
-
         </div>
 
-        {/* Right Side: Risk score & AI Analysis report summary */}
+        {/* Right column */}
         <div className="space-y-6">
-          
-          {/* Risk Score Card */}
+
+          {/* Risk score */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col items-center justify-center text-center space-y-4">
             <h2 className="text-sm font-semibold text-slate-300">Target Risk Assessment</h2>
             <RiskScore score={scan.risk_score} size="lg" />
             <div className="space-y-1">
               <p className="text-xs text-slate-400 font-medium">
-                {scan.risk_score === null ? "Awaiting completion" : 
-                 scan.risk_score >= 70 ? "Critical Threat Level Detected" :
-                 scan.risk_score >= 40 ? "Medium Vulnerability Level" : "Low Security Risk"}
+                {scan.risk_score === null
+                  ? "Awaiting completion"
+                  : scan.risk_score >= 70
+                  ? "Critical Threat Level Detected"
+                  : scan.risk_score >= 40
+                  ? "Medium Vulnerability Level"
+                  : "Low Security Risk"}
               </p>
               <p className="text-[10px] text-slate-600 max-w-[200px]">
-                Calculated based on open CVEs, blacklists, port vulnerabilities, and reputation matrices.
+                Weighted across Nuclei CVEs, ZAP alerts, abuse confidence, VirusTotal detections &
+                port exposure.
               </p>
             </div>
           </div>
 
-          {/* AI Analysis Summary */}
+          {/* Pipeline summary while running */}
+          {isRunning && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-3">
+              <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-yellow-400" />
+                Pipeline Phases
+              </h2>
+              {[
+                { range: [0, 45],   label: "Threat Intelligence", color: "bg-cyan-500"   },
+                { range: [45, 60],  label: "Network Scan",        color: "bg-blue-500"   },
+                { range: [60, 100], label: "Active Detection",    color: "bg-orange-500" },
+              ].map(({ range, label, color }) => {
+                const phaseProgress = Math.min(
+                  Math.max(((scan.progress - range[0]) / (range[1] - range[0])) * 100, 0),
+                  100
+                );
+                const done = scan.progress >= range[1];
+                const active = scan.progress >= range[0] && scan.progress < range[1];
+                return (
+                  <div key={label}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className={cn(
+                        done ? "text-green-400" : active ? "text-slate-200" : "text-slate-600"
+                      )}>
+                        {done ? "✓" : active ? "▶" : "○"} {label}
+                      </span>
+                      <span className="text-slate-600 tabular-nums">
+                        {done ? "100" : active ? Math.round(phaseProgress) : "0"}%
+                      </span>
+                    </div>
+                    <div className="h-1 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className={cn("h-full rounded-full transition-all duration-500", color)}
+                        style={{ width: `${done ? 100 : active ? phaseProgress : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* AI analysis */}
           {scan.ai_analysis && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-4">
               <div className="flex items-center gap-2 text-cyan-400 border-b border-slate-800 pb-3">
@@ -204,8 +276,28 @@ export default function ScanDetailPage({ params }: PageProps) {
             </div>
           )}
 
+          {/* Completed summary */}
+          {isCompleted && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-3">
+              <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-400" />
+                Scan Summary
+              </h2>
+              {[
+                { label: "Threat Intel",      icon: "🔍", done: true },
+                { label: "Network Scan",      icon: "🌐", done: true },
+                { label: "Active Detection",  icon: "⚡", done: true },
+                { label: "Risk Aggregation",  icon: "📊", done: true },
+              ].map(({ label, icon, done }) => (
+                <div key={label} className="flex items-center gap-2 text-xs">
+                  <span>{icon}</span>
+                  <span className={done ? "text-green-400" : "text-slate-500"}>{label}</span>
+                  {done && <CheckCircle2 className="h-3 w-3 text-green-400 ml-auto" />}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-
       </div>
     </div>
   );

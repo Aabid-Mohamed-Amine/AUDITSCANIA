@@ -15,12 +15,14 @@ export default function LoginPage() {
       router.replace("/dashboard");
     }
   }, [isAuthenticated, isLoading, router]);
+
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [showConfirmPass, setShowConfirmPass] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -38,7 +40,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       if (mode === "login") {
-        await login(email, password);
+        await login(email, password, rememberMe);
         toast.success("Welcome back!");
         router.push("/dashboard");
       } else {
@@ -55,6 +57,14 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (isLoading || isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Shield className="h-6 w-6 text-cyan-400 animate-pulse" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -122,6 +132,20 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {mode === "login" && (
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 accent-cyan-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-400">Remember me</span>
+                </label>
+              </div>
+            )}
+
             {mode === "register" && (
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1.5">Confirm Password</label>
@@ -172,7 +196,7 @@ export default function LoginPage() {
           <p className="text-center text-sm text-slate-500 mt-5">
             {mode === "login" ? "Don't have an account? " : "Already have an account? "}
             <button
-              onClick={() => { setMode(mode === "login" ? "register" : "login"); setEmail(""); setPassword(""); setConfirmPassword(""); setError(""); }}
+              onClick={() => { setMode(mode === "login" ? "register" : "login"); setEmail(""); setPassword(""); setConfirmPassword(""); setRememberMe(false); setError(""); }}
               className="text-cyan-400 hover:text-cyan-300 font-medium"
             >
               {mode === "login" ? "Sign up" : "Sign in"}

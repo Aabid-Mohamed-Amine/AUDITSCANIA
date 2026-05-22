@@ -30,7 +30,13 @@ export function useScans(
   return useQuery({
     queryKey: SCAN_KEYS.list(skip, limit),
     queryFn: () => scansApi.list(skip, limit),
-    refetchInterval: 5000, // Poll every 5 s for live status updates
+    refetchInterval: (query) => {
+      const items = (query.state.data as ScanListResponse | undefined)?.items ?? [];
+      const hasActive = items.some(
+        (s) => s.status === "running" || s.status === "pending"
+      );
+      return hasActive ? 3000 : false;
+    },
     staleTime: 2000,
   });
 }
