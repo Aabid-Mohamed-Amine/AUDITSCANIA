@@ -36,6 +36,26 @@ def setup_test_db():
         pass  # Windows: file still locked by SQLite; GC will release it
 
 
+@pytest.fixture(autouse=True)
+def mock_redis():
+    class FakeRedis:
+        _data = {}
+
+        def setex(self, name: str, time: int, value: str):
+            self._data[name] = value
+
+        def exists(self, name: str) -> int:
+            return 1 if name in self._data else 0
+
+        def close(self):
+            pass
+
+    FakeRedis._data.clear()
+    with patch("app.core.security._redis", return_value=FakeRedis()):
+        yield
+
+
+
 @pytest.fixture
 def client(setup_test_db):
     def _override_get_db():
