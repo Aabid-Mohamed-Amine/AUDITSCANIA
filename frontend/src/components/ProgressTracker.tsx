@@ -2,286 +2,223 @@
 
 import React from "react";
 import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
-import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
-// ---------------------------------------------------------------------------
-// Pipeline definition — must mirror scan_tasks.py progress ranges
-// ---------------------------------------------------------------------------
+/* ── Pipeline — mirrors scan_tasks.py 8-phase order ─────────────────────── */
 
-interface SubStep {
+interface Step {
   id: string;
   label: string;
-  description: string;
-  progressStart: number;
-  progressEnd: number;
+  desc: string;
+  start: number;
+  end: number;
 }
 
 interface Phase {
   id: string;
   label: string;
-  steps: SubStep[];
+  phaseNum: number;
+  steps: Step[];
 }
 
 const PHASES: Phase[] = [
   {
-    id: "threat-intel",
-    label: "Threat Intelligence",
+    id: "asset", label: "Asset Discovery", phaseNum: 1,
     steps: [
-      {
-        id: "shodan",
-        label: "Shodan",
-        description: "Passive recon — open ports, banners, CVEs",
-        progressStart: 0,
-        progressEnd: 15,
-      },
-      {
-        id: "virustotal",
-        label: "VirusTotal",
-        description: "Malware & reputation analysis",
-        progressStart: 15,
-        progressEnd: 30,
-      },
-      {
-        id: "abuseipdb",
-        label: "AbuseIPDB",
-        description: "Abuse database & blacklist check",
-        progressStart: 30,
-        progressEnd: 45,
-      },
+      { id: "shodan",  label: "Shodan",       desc: "Passive recon — public index, banners, CVEs",   start: 0,  end: 12 },
     ],
   },
   {
-    id: "network",
-    label: "Network Scan",
+    id: "recon", label: "Active Recon", phaseNum: 2,
     steps: [
-      {
-        id: "nmap",
-        label: "Nmap",
-        description: "Active port & service fingerprinting",
-        progressStart: 45,
-        progressEnd: 60,
-      },
+      { id: "zap",     label: "OWASP ZAP",    desc: "Web spider — endpoints, ports, vulnerabilities", start: 12, end: 27 },
     ],
   },
   {
-    id: "active-detection",
-    label: "Active Detection",
+    id: "fingerprint", label: "Fingerprinting", phaseNum: 3,
     steps: [
-      {
-        id: "nuclei",
-        label: "Nuclei",
-        description: "CVE & vulnerability template scan",
-        progressStart: 60,
-        progressEnd: 76,
-      },
-      {
-        id: "zap",
-        label: "OWASP ZAP",
-        description: "Web application security scan",
-        progressStart: 76,
-        progressEnd: 92,
-      },
-      {
-        id: "score",
-        label: "Risk Aggregation",
-        description: "Computing final risk score",
-        progressStart: 92,
-        progressEnd: 100,
-      },
+      { id: "nmap",    label: "Nmap",          desc: "Active port & service discovery",              start: 27, end: 44 },
+    ],
+  },
+  {
+    id: "vulnscan", label: "Vulnerability Scanning", phaseNum: 4,
+    steps: [
+      { id: "nuclei",  label: "Nuclei",        desc: "CVE template scan, targeted by Nmap services", start: 44, end: 60 },
+    ],
+  },
+  {
+    id: "threatintel", label: "Threat Intelligence", phaseNum: 5,
+    steps: [
+      { id: "vt",      label: "VirusTotal",    desc: "Malware & reputation analysis",                start: 60, end: 69 },
+      { id: "abuse",   label: "AbuseIPDB",     desc: "Abuse confidence & blacklist check",           start: 69, end: 78 },
+    ],
+  },
+  {
+    id: "correlation", label: "Correlation Engine", phaseNum: 6,
+    steps: [
+      { id: "corr",    label: "Correlator",    desc: "Fuse Nmap + ZAP + Nuclei + Threat Intel",      start: 78, end: 88 },
+    ],
+  },
+  {
+    id: "riskscore", label: "Risk Scoring", phaseNum: 7,
+    steps: [
+      { id: "score",   label: "Risk Engine",   desc: "Multi-factor weighted scoring",                start: 88, end: 94 },
+    ],
+  },
+  {
+    id: "soc", label: "SOC Dashboard", phaseNum: 8,
+    steps: [
+      { id: "soc",     label: "SOC Report",    desc: "Executive summary & recommendations",          start: 94, end: 100 },
     ],
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Status helpers
-// ---------------------------------------------------------------------------
+/* ── Helpers ─────────────────────────────────────────────────────────────── */
 
-type StepStatus = "done" | "active" | "pending" | "failed";
+type S = "done" | "active" | "pending" | "failed";
 
-function computeStepStatus(
-  progressStart: number,
-  progressEnd: number,
-  progress: number,
-  scanStatus: string
-): StepStatus {
+function stepStatus(start: number, end: number, prog: number, scanStatus: string): S {
   if (scanStatus === "failed") {
-    if (progress >= progressEnd) return "done";
-    if (progress >= progressStart) return "failed";
+    if (prog >= end)   return "done";
+    if (prog >= start) return "failed";
     return "pending";
   }
-  if (progress >= progressEnd) return "done";
-  if (progress >= progressStart) return "active";
+  if (prog >= end)   return "done";
+  if (prog >= start) return "active";
   return "pending";
 }
 
-function computePhaseStatus(phase: Phase, progress: number, scanStatus: string): StepStatus {
-  const first = phase.steps[0];
-  const last = phase.steps[phase.steps.length - 1];
-  return computeStepStatus(first.progressStart, last.progressEnd, progress, scanStatus);
+function phaseStatus(phase: Phase, prog: number, scanStatus: string): S {
+  return stepStatus(
+    phase.steps[0].start,
+    phase.steps[phase.steps.length - 1].end,
+    prog, scanStatus
+  );
 }
 
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
+/* ── Status icon ─────────────────────────────────────────────────────────── */
 
-function StepIcon({ status }: { status: StepStatus }) {
-  if (status === "done")
-    return <CheckCircle2 className="h-4 w-4 text-green-400 flex-shrink-0" />;
-  if (status === "active")
-    return <Loader2 className="h-4 w-4 text-cyan-400 animate-spin flex-shrink-0" />;
-  if (status === "failed")
-    return <XCircle className="h-4 w-4 text-red-400 flex-shrink-0" />;
-  return <Circle className="h-4 w-4 text-slate-600 flex-shrink-0" />;
+function Icon({ s }: { s: S }) {
+  if (s === "done")   return <CheckCircle2 className="w-[15px] h-[15px] text-emerald-400 shrink-0" />;
+  if (s === "active") return <Loader2      className="w-[15px] h-[15px] text-blue-400 animate-spin shrink-0" />;
+  if (s === "failed") return <XCircle      className="w-[15px] h-[15px] text-red-400 shrink-0" />;
+  return                     <Circle       className="w-[15px] h-[15px] text-[#1a3550] shrink-0" />;
 }
 
-// ---------------------------------------------------------------------------
-// Phase colour tokens
-// ---------------------------------------------------------------------------
+/* ── Component ───────────────────────────────────────────────────────────── */
 
-const PHASE_COLORS: Record<string, { border: string; bg: string; label: string; badge: string; badgeBg: string }> = {
-  "threat-intel": {
-    border: "border-cyan-500/20",
-    bg: "bg-cyan-500/5",
-    label: "text-cyan-400",
-    badge: "text-cyan-400",
-    badgeBg: "bg-cyan-400/10 border-cyan-400/20",
-  },
-  network: {
-    border: "border-blue-500/20",
-    bg: "bg-blue-500/5",
-    label: "text-blue-400",
-    badge: "text-blue-400",
-    badgeBg: "bg-blue-400/10 border-blue-400/20",
-  },
-  "active-detection": {
-    border: "border-orange-500/20",
-    bg: "bg-orange-500/5",
-    label: "text-orange-400",
-    badge: "text-orange-400",
-    badgeBg: "bg-orange-400/10 border-orange-400/20",
-  },
-};
+interface Props { progress: number; status: string; message?: string }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+export default function ProgressTracker({ progress, status, message }: Props) {
+  const pct = Math.min(progress, 100);
+  const barColor =
+    status === "failed"    ? "bg-red-500"     :
+    status === "completed" ? "bg-emerald-500" :
+    "bg-blue-500";
 
-interface ProgressTrackerProps {
-  progress: number;
-  status: string;
-  message?: string;
-}
-
-export default function ProgressTracker({ progress, status, message }: ProgressTrackerProps) {
   return (
-    <div className="space-y-5">
-      {/* ── Global bar ── */}
-      <div className="space-y-1.5">
-        <div className="flex justify-between items-center">
-          <span className="text-sm text-slate-300 font-medium">
-            {status === "completed"
-              ? "Scan complete"
-              : status === "failed"
-              ? "Scan failed"
-              : message || "Scanning…"}
+    <div className="space-y-4">
+
+      {/* ── Global progress bar ─────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[12px] text-[#7aa8cc] truncate">
+            {status === "completed" ? "Scan complete"
+             : status === "failed"  ? "Scan failed"
+             : message || "Scanning…"}
           </span>
-          <span className="text-sm text-slate-400 tabular-nums font-mono">{progress}%</span>
+          <span className="text-[12px] font-mono text-[#3d6080] shrink-0 ml-2 tabular-nums">
+            {pct}%
+          </span>
         </div>
-        <Progress
-          value={progress}
-          className={cn(
-            "h-2 bg-slate-700",
-            status === "failed" && "[&>div]:bg-red-500",
-            status === "completed" && "[&>div]:bg-green-500"
-          )}
-        />
+        <div className="h-[3px] bg-[#0f1e30] rounded-full overflow-hidden">
+          <div
+            className={cn("h-full rounded-full transition-all duration-500", barColor)}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
       </div>
 
-      {/* ── Phases ── */}
-      <div className="space-y-3">
+      {/* ── Phase stepper ───────────────────────────────────── */}
+      <div className="space-y-[2px]">
         {PHASES.map((phase) => {
-          const ps = computePhaseStatus(phase, progress, status);
-          const colors = PHASE_COLORS[phase.id];
-          const isVisible = ps !== "pending";
+          const ps   = phaseStatus(phase, progress, status);
+          const show = ps !== "pending";
 
           return (
             <div
               key={phase.id}
               className={cn(
-                "rounded-lg border transition-all",
-                ps === "done" && "border-green-500/20 bg-green-500/5",
-                ps === "active" && cn("border-2", colors.border, colors.bg),
-                ps === "failed" && "border-red-500/20 bg-red-500/5",
-                ps === "pending" && "border-slate-700/40 bg-slate-800/20 opacity-50"
+                "rounded-[5px] border transition-all duration-200 overflow-hidden",
+                ps === "done"    && "border-[#0f2a1a] bg-emerald-950/20",
+                ps === "active"  && "border-blue-800/50 bg-blue-950/20",
+                ps === "failed"  && "border-red-900/50 bg-red-950/20",
+                ps === "pending" && "border-[#0a1828] bg-transparent opacity-40"
               )}
             >
               {/* Phase header */}
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <StepIcon status={ps} />
-                  <span
-                    className={cn(
-                      "text-sm font-semibold",
-                      ps === "done" && "text-green-400",
-                      ps === "active" && colors.label,
-                      ps === "failed" && "text-red-400",
-                      ps === "pending" && "text-slate-500"
-                    )}
-                  >
-                    {phase.label}
-                  </span>
-                </div>
+              <div className="flex items-center gap-2.5 px-3 py-2">
+                {/* Phase number */}
                 <span
                   className={cn(
-                    "text-[10px] font-medium px-2 py-0.5 rounded-full border",
-                    ps === "done" && "text-green-400 bg-green-400/10 border-green-400/20",
-                    ps === "active" && cn(colors.badge, colors.badgeBg),
-                    ps === "failed" && "text-red-400 bg-red-400/10 border-red-400/20",
-                    ps === "pending" && "text-slate-600 bg-slate-700/20 border-slate-700"
+                    "text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0 font-mono",
+                    ps === "done"    ? "bg-emerald-500/20 text-emerald-400" :
+                    ps === "active"  ? "bg-blue-500/20 text-blue-400"      :
+                    ps === "failed"  ? "bg-red-500/20 text-red-400"        :
+                    "bg-[#0a1828] text-[#1a3550]"
                   )}
                 >
-                  {ps === "done"
-                    ? "Done"
-                    : ps === "active"
-                    ? "Running"
-                    : ps === "failed"
-                    ? "Failed"
-                    : "Pending"}
+                  {phase.phaseNum}
+                </span>
+
+                <Icon s={ps} />
+
+                <span
+                  className={cn(
+                    "text-[12px] font-semibold flex-1",
+                    ps === "done"    ? "text-emerald-400" :
+                    ps === "active"  ? "text-blue-300"    :
+                    ps === "failed"  ? "text-red-400"     :
+                    "text-[#1e3a55]"
+                  )}
+                >
+                  {phase.label}
+                </span>
+
+                <span
+                  className={cn(
+                    "text-[9px] font-bold px-1.5 py-0.5 rounded-[3px] border tracking-widest uppercase shrink-0",
+                    ps === "done"    ? "text-emerald-400 bg-emerald-950/60 border-emerald-800/60"  :
+                    ps === "active"  ? "text-blue-400 bg-blue-950/60 border-blue-800/60"          :
+                    ps === "failed"  ? "text-red-400 bg-red-950/60 border-red-800/60"             :
+                    "text-[#1a3550] bg-transparent border-[#0a1828]"
+                  )}
+                >
+                  {ps === "done" ? "Done" : ps === "active" ? "Running" : ps === "failed" ? "Failed" : "Pending"}
                 </span>
               </div>
 
-              {/* Sub-steps — only shown when phase is active or done */}
-              {isVisible && (
-                <div className="border-t border-slate-700/30 px-4 pt-2 pb-3 space-y-2">
+              {/* Sub-steps (shown when active or done) */}
+              {show && phase.steps.length > 1 && (
+                <div className="border-t border-[#0f1e30]/60 px-3 pt-1.5 pb-2 space-y-1.5">
                   {phase.steps.map((step) => {
-                    const ss = computeStepStatus(
-                      step.progressStart,
-                      step.progressEnd,
-                      progress,
-                      status
-                    );
+                    const ss = stepStatus(step.start, step.end, progress, status);
                     return (
-                      <div key={step.id} className="flex items-center gap-3">
-                        <StepIcon status={ss} />
-                        <div className="flex-1 min-w-0">
-                          <span
-                            className={cn(
-                              "text-xs font-medium",
-                              ss === "done" && "text-slate-300",
-                              ss === "active" && "text-cyan-300",
-                              ss === "failed" && "text-red-400",
-                              ss === "pending" && "text-slate-600"
-                            )}
-                          >
-                            {step.label}
-                          </span>
-                          <span className="text-xs text-slate-600 ml-2 hidden sm:inline">
-                            {step.description}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-slate-600 tabular-nums flex-shrink-0">
-                          {step.progressEnd}%
+                      <div key={step.id} className="flex items-center gap-2.5 pl-7">
+                        <Icon s={ss} />
+                        <span
+                          className={cn(
+                            "text-[11px]",
+                            ss === "done"    ? "text-[#4a8ab5]"  :
+                            ss === "active"  ? "text-blue-300"   :
+                            ss === "failed"  ? "text-red-400"    :
+                            "text-[#1e3a55]"
+                          )}
+                        >
+                          {step.label}
+                        </span>
+                        <span className="text-[10px] text-[#1a3550] ml-auto font-mono">
+                          {step.end}%
                         </span>
                       </div>
                     );

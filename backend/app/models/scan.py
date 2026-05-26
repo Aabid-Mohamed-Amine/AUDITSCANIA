@@ -56,6 +56,13 @@ class Scan(Base):
     nuclei_data = Column(JSON, nullable=True)
     zap_data = Column(JSON, nullable=True)
 
+    # Correlation Engine + SOC output
+    correlated_data = Column(JSON, nullable=True)   # CorrelationReport (fast access)
+    soc_report = Column(JSON, nullable=True)         # SOC Dashboard report
+
+    # Active pipeline phase label (for live UI)
+    current_phase = Column(String(64), nullable=True)
+
     # AI analysis
     ai_analysis = Column(Text, nullable=True)
 

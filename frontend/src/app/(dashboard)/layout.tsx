@@ -18,17 +18,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (isLoading || !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="flex items-center gap-3 text-slate-400">
-          <Shield className="h-6 w-6 text-cyan-400 animate-pulse" />
-          <span className="text-sm">Loading AuditScan...</span>
+      <div className="min-h-screen bg-[#050c18] flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <Shield className="w-5 h-5 text-blue-500 animate-pulse" />
+          <span className="text-[13px] text-[#2a5070]">Loading AuditScan…</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-950">
+    <div className="flex h-screen bg-[#050c18] overflow-hidden">
       <Sidebar />
       <main className="flex-1 overflow-auto">
         {children}

@@ -70,6 +70,7 @@ class ScanResponse(BaseModel):
     risk_score: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    # Raw scanner outputs
     shodan_data: Optional[Dict[str, Any]] = None
     virustotal_data: Optional[Dict[str, Any]] = None
     abuseipdb_data: Optional[Dict[str, Any]] = None
@@ -78,6 +79,10 @@ class ScanResponse(BaseModel):
     zap_data: Optional[Dict[str, Any]] = None
     ai_analysis: Optional[str] = None
     error_message: Optional[str] = None
+    # Correlation Engine + SOC output
+    correlated_data: Optional[Dict[str, Any]] = None
+    soc_report: Optional[Dict[str, Any]] = None
+    current_phase: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

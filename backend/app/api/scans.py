@@ -153,12 +153,15 @@ def retry_scan(
     scan.progress = 0
     scan.risk_score = None
     scan.error_message = None
+    scan.current_phase = None
     scan.shodan_data = None
     scan.virustotal_data = None
     scan.abuseipdb_data = None
     scan.nmap_data = None
     scan.nuclei_data = None
     scan.zap_data = None
+    scan.correlated_data = None
+    scan.soc_report = None
     scan.ai_analysis = None
     db.commit()
     db.refresh(scan)
