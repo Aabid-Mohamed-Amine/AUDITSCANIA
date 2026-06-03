@@ -58,8 +58,12 @@ _SECURITY_HEADER_KEYWORDS = {
 
 class ScanRequest(BaseModel):
     target: str
-    spider_minutes: int = 2
-    timeout: int = 900  # 15 minutes max
+    spider_minutes: int = 1
+    timeout: int = 600
+    ajax_spider: bool = False
+    # Auth injection (optional — injected via ZAP replacer plugin)
+    headers: Optional[Dict[str, str]] = None
+    cookies: Optional[Dict[str, str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +117,7 @@ def _aggregate_by_risk(alerts: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def _extract_endpoints(alerts: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """Collect unique URLs discovered from alert instances."""
+    """Collect unique URLs discovered from all alert instances (all risk levels)."""
     seen: set = set()
     endpoints: List[Dict[str, str]] = []
     for alert in alerts:
@@ -127,10 +131,32 @@ def _extract_endpoints(alerts: List[Dict[str, Any]]) -> List[Dict[str, str]]:
                     "method": inst.get("method", "GET"),
                     "path": parsed.path,
                     "port": str(parsed.port or ""),
+                    "param": inst.get("param", ""),
                 })
-                if len(endpoints) >= 300:
+                if len(endpoints) >= 500:
                     return endpoints
     return endpoints
+
+
+def _extract_endpoints_from_stdout(stdout: str, base_url: str) -> List[str]:
+    """Parse ZAP stdout to extract URLs from the spider pass."""
+    seen: set = set()
+    urls: List[str] = []
+    parsed_base = urlparse(base_url)
+    base_netloc = parsed_base.netloc
+
+    for line in stdout.splitlines():
+        # ZAP logs lines like: "PASS Spider: ... https://target/path [200]"
+        m = re.search(r"https?://[^\s\"'<>]+", line)
+        if m:
+            url = m.group(0).rstrip(".,;)")
+            parsed = urlparse(url)
+            if parsed.netloc == base_netloc and url not in seen:
+                seen.add(url)
+                urls.append(url)
+                if len(urls) >= 300:
+                    break
+    return urls
 
 
 def _extract_form_params(alerts: List[Dict[str, Any]]) -> List[str]:
@@ -214,8 +240,38 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "-t", target_url,
         "-J", report_filename,
         "-m", str(req.spider_minutes),
+        "-j",
         "-I",
     ]
+
+    # ── Auth injection via ZAP packaged-scan env vars ──────────────────────
+    # On utilise ZAP_AUTH_HEADER / ZAP_AUTH_HEADER_VALUE : le mécanisme officiel
+    # supporté par zap-baseline.py. Contrairement à l'option -z (découpée sur
+    # les espaces), une variable d'environnement gère sans souci une valeur avec
+    # espace comme "Bearer eyJ...". On injecte UN header (Authorization en
+    # priorité, sinon Cookie, sinon le premier header fourni).
+    scan_env = dict(os.environ)
+    auth_header_name: Optional[str]  = None
+    auth_header_value: Optional[str] = None
+
+    if req.headers:
+        for k, v in req.headers.items():
+            if k.lower() == "authorization":
+                auth_header_name, auth_header_value = k, v
+                break
+        if auth_header_name is None:
+            k, v = next(iter(req.headers.items()))
+            auth_header_name, auth_header_value = k, v
+
+    if auth_header_name is None and req.cookies:
+        auth_header_name  = "Cookie"
+        auth_header_value = "; ".join(f"{k}={v}" for k, v in req.cookies.items())
+
+    if auth_header_name and auth_header_value:
+        scan_env["ZAP_AUTH_HEADER"]       = auth_header_name
+        scan_env["ZAP_AUTH_HEADER_VALUE"] = auth_header_value
+        scan_env["ZAP_AUTH_HEADER_SITE"]  = urlparse(target_url).netloc
+        logger.info("ZAP auth: injecting header %s via env vars", auth_header_name)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -223,12 +279,15 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd="/zap",
+            env=scan_env,
         )
-        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=req.timeout)
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=req.timeout)
+        stdout_text = stdout_bytes.decode(errors="replace") if stdout_bytes else ""
 
         if proc.returncode == 3:
             result["error"] = stderr_bytes.decode(errors="replace").strip()[:500]
             logger.error("ZAP returned exit 3 for %s: %s", target_url, result["error"])
+        result["_stdout"] = stdout_text
 
     except asyncio.TimeoutError:
         try:
@@ -250,6 +309,25 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
                 report = json.load(fh)
             alerts = _extract_alerts(report)
             endpoints = _extract_endpoints(alerts)
+
+            # Enrich endpoints with URLs found in spider stdout
+            stdout_text = result.pop("_stdout", "")
+            spider_urls = _extract_endpoints_from_stdout(stdout_text, target_url)
+            ep_seen = {ep["url"] for ep in endpoints}
+            for url in spider_urls:
+                if url not in ep_seen:
+                    parsed = urlparse(url)
+                    endpoints.append({
+                        "url": url,
+                        "method": "GET",
+                        "path": parsed.path,
+                        "port": str(parsed.port or ""),
+                        "param": "",
+                    })
+                    ep_seen.add(url)
+                    if len(endpoints) >= 500:
+                        break
+
             result["alerts"] = alerts
             result["total"] = len(alerts)
             result["by_risk"] = _aggregate_by_risk(alerts)
@@ -257,6 +335,8 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             result["form_params"] = _extract_form_params(alerts)
             result["abnormal_headers"] = _extract_abnormal_headers(alerts)
             result["implicit_ports"] = _extract_ports_from_endpoints(endpoints)
+        else:
+            result.pop("_stdout", None)
     except Exception as exc:
         logger.error("Failed to parse ZAP report for %s: %s", target_url, exc)
         if not result["error"]:

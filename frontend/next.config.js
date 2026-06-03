@@ -2,6 +2,7 @@
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
+  optimizeFonts: false,
   async rewrites() {
     return [
       {

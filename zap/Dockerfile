@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir --break-system-packages fastapi==0.115.0 "uvicorn
 
 # ZAP baseline always writes reports to /zap/wrk — create it so the mount
 # warning disappears and the JSON file is actually written.
-RUN mkdir -p /zap/wrk
+RUN mkdir -p /zap/wrk && mkdir -p /home/zap && chmod 777 /home/zap
 
 WORKDIR /app
 COPY server.py .

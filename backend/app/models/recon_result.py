@@ -44,6 +44,13 @@ class ReconnaissanceResult(Base):
     # SOC Dashboard report
     soc_report = Column(JSON, nullable=True)
 
+    # Enhanced scanner outputs (v2)
+    subfinder_data    = Column(JSON, nullable=True)
+    dalfox_data       = Column(JSON, nullable=True)
+    fp_reduction_data = Column(JSON, nullable=True)
+    fp_reduction_rate = Column(Float, nullable=True)
+    false_positive_count = Column(Integer, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     scan = relationship("Scan", back_populates="recon_result")

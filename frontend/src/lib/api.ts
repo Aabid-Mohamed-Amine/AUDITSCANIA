@@ -19,13 +19,31 @@ export interface Scan {
   risk_score: number | null;
   created_at: string;
   updated_at: string;
+  current_phase: string | null;
+  // v1 scanners
   shodan_data: Record<string, unknown> | null;
   virustotal_data: Record<string, unknown> | null;
   abuseipdb_data: Record<string, unknown> | null;
   nmap_data: Record<string, unknown> | null;
   nuclei_data: Record<string, unknown> | null;
   zap_data: Record<string, unknown> | null;
+  // v2 scanners
+  subfinder_data: Record<string, unknown> | null;
+  dalfox_data: Record<string, unknown> | null;
+  fp_reduction_data: Record<string, unknown> | null;
+  // v3 scanners (Phase 3)
+  ffuf_data: Record<string, unknown> | null;
+  sqlmap_data: Record<string, unknown> | null;
+  gitleaks_data: Record<string, unknown> | null;
+  katana_data: Record<string, unknown> | null;
+  // correlation + SOC
+  correlated_data: Record<string, unknown> | null;
+  soc_report: Record<string, unknown> | null;
+  // AI
   ai_analysis: string | null;
+  ai_analysis_data: Record<string, unknown> | null;
+  // Auth detection (Phase 1.5)
+  auth_config: Record<string, unknown> | null;
   error_message: string | null;
   logs?: ScanLog[];
 }
@@ -35,8 +53,19 @@ export interface ScanListResponse {
   items: Scan[];
 }
 
+export interface AuthCredentials {
+  username?: string;
+  password?: string;
+  token?: string;
+  cookie?: string;
+  login_url?: string;
+  header_name?: string;
+  header_prefix?: string;
+}
+
 export interface CreateScanPayload {
   target: string;
+  credentials?: AuthCredentials;
 }
 
 export interface User {
@@ -98,15 +127,25 @@ export const tokenStore = {
 export const apiClient: AxiosInstance = axios.create({
   baseURL: "/api",
   headers: { "Content-Type": "application/json" },
-  timeout: 30_000,
+  timeout: 120_000,  // 2 min — scans take time, DB pool can be under pressure
 });
 
-// ---- Request interceptor: inject access token ----
-apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+// Lightweight client for polling endpoints (scan status, logs)
+// Shorter timeout — if it fails, React Query retries automatically
+export const pollClient: AxiosInstance = axios.create({
+  baseURL: "/api",
+  headers: { "Content-Type": "application/json" },
+  timeout: 15_000,
+});
+
+// ---- Request interceptor: inject access token (both clients) ----
+const _authInterceptor = (config: InternalAxiosRequestConfig) => {
   const token = tokenStore.getAccess();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
-});
+};
+apiClient.interceptors.request.use(_authInterceptor);
+pollClient.interceptors.request.use(_authInterceptor);
 
 // ---- Response interceptor: 401 → silent refresh → retry ----
 
@@ -231,12 +270,13 @@ export const scansApi = {
   },
 
   get: async (id: string): Promise<Scan> => {
-    const response = await apiClient.get<Scan>(`/scans/${id}`);
+    // Use pollClient (15s timeout) — called every 3s during active scans
+    const response = await pollClient.get<Scan>(`/scans/${id}`);
     return response.data;
   },
 
   getLogs: async (id: string): Promise<ScanLog[]> => {
-    const response = await apiClient.get<ScanLog[]>(`/scans/${id}/logs`);
+    const response = await pollClient.get<ScanLog[]>(`/scans/${id}/logs`);
     return response.data;
   },
 

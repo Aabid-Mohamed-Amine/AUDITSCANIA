@@ -8,8 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install dependencies inline (no separate requirements.txt needed)
-RUN pip install --no-cache-dir fastapi==0.115.0 "uvicorn[standard]==0.30.6"
+RUN pip install --no-cache-dir fastapi==0.115.0 "uvicorn[standard]==0.30.6" httpx==0.27.0
 
 COPY server.py .
 

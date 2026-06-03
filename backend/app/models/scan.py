@@ -63,8 +63,23 @@ class Scan(Base):
     # Active pipeline phase label (for live UI)
     current_phase = Column(String(64), nullable=True)
 
+    # Enhanced scanner outputs (v2)
+    subfinder_data    = Column(JSON, nullable=True)
+    dalfox_data       = Column(JSON, nullable=True)
+    fp_reduction_data = Column(JSON, nullable=True)
+
+    # New scanners (v3)
+    ffuf_data         = Column(JSON, nullable=True)
+    sqlmap_data       = Column(JSON, nullable=True)
+    gitleaks_data     = Column(JSON, nullable=True)
+    katana_data       = Column(JSON, nullable=True)  # Phase 3 JS/SPA crawler (added 0006)
+
     # AI analysis
-    ai_analysis = Column(Text, nullable=True)
+    ai_analysis      = Column(Text, nullable=True)
+    ai_analysis_data = Column(JSON, nullable=True)
+
+    # Auth detection result (stored after Phase 1.5 — no credentials stored)
+    auth_config = Column(JSON, nullable=True)
 
     # Risk score 0-100 (computed after all recon)
     risk_score = Column(Integer, nullable=True)

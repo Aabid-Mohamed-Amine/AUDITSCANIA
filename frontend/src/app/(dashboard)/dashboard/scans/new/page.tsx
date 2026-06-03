@@ -62,7 +62,8 @@ export default function NewScanPage() {
               Reconnaissance Target
             </h2>
             <p className="text-[11px] text-[#2a5070] mt-1">
-              Enter an IPv4 address, domain name, or URL. Ensure you are authorized to test this target.
+              IPv4, domain, full URL, ou nom de service Docker (ex : juiceshop, dvwa, localhost:3000).
+              http:// sera ajouté automatiquement si absent.
             </p>
           </div>
           <ScanForm />

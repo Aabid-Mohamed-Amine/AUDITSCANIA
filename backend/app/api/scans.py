@@ -1,8 +1,11 @@
 import uuid
 import logging
+import re
+from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -59,8 +62,10 @@ def create_scan(
 
     try:
         from app.workers.scan_tasks import run_scan
-        run_scan.delay(str(scan.id))
-        logger.info("Celery task queued for scan %s", scan.id)
+        # Credentials passed to the worker only (never persisted in DB)
+        creds = payload.credentials.model_dump() if payload.credentials else None
+        run_scan.delay(str(scan.id), credentials=creds)
+        logger.info("Celery task queued for scan %s (auth=%s)", scan.id, bool(creds))
     except Exception as exc:
         logger.error("Failed to enqueue task for scan %s: %s", scan.id, exc)
 
@@ -163,6 +168,7 @@ def retry_scan(
     scan.correlated_data = None
     scan.soc_report = None
     scan.ai_analysis = None
+    scan.auth_config = None
     db.commit()
     db.refresh(scan)
 
@@ -198,3 +204,90 @@ def delete_scan(
     scan = _get_user_scan(scan_id, current_user, db)
     db.delete(scan)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/scans/{scan_id}/report.json
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{scan_id}/report.json",
+    summary="Download structured JSON report (detected_by per finding)",
+    response_class=Response,
+)
+def download_report_json(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    scan = _get_user_scan(scan_id, current_user, db)
+
+    if scan.status != ScanStatus.completed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Report not available — scan is not completed yet",
+        )
+
+    try:
+        from app.services.report_service import build_report_json
+        import json as _json
+        report = build_report_json(scan)
+    except Exception as exc:
+        logger.exception("report.json build failed for scan %s", scan_id)
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}")
+
+    # Safe filename: keep only alphanumeric, dots, hyphens
+    safe_target = re.sub(r"[^a-zA-Z0-9.\-]", "_", scan.target)[:40]
+    date_str    = datetime.utcnow().strftime("%Y%m%d")
+    filename    = f"auditscania_{safe_target}_{date_str}.json"
+
+    return Response(
+        content=_json.dumps(report, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/scans/{scan_id}/report.pdf
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{scan_id}/report.pdf",
+    summary="Download professional PDF report (BDO style)",
+    response_class=Response,
+)
+def download_report_pdf(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    scan = _get_user_scan(scan_id, current_user, db)
+
+    if scan.status != ScanStatus.completed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Report not available — scan is not completed yet",
+        )
+
+    try:
+        from app.services.report_service import build_report_json, generate_pdf
+        report  = build_report_json(scan)
+        pdf_bytes = generate_pdf(report)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=501, detail=str(exc))
+    except Exception as exc:
+        logger.exception("PDF generation failed for scan %s", scan_id)
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
+
+    safe_target = re.sub(r"[^a-zA-Z0-9.\-]", "_", scan.target)[:40]
+    date_str    = datetime.utcnow().strftime("%Y%m%d")
+    filename    = f"auditscania_{safe_target}_{date_str}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

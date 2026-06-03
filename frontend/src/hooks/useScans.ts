@@ -52,10 +52,17 @@ export function useScan(id: string): UseQueryResult<Scan> {
     enabled: Boolean(id),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      // Keep polling while the scan is still running
-      return status === "running" || status === "pending" ? 3000 : false;
+      return status === "running" || status === "pending" ? 4000 : false;
     },
     staleTime: 1000,
+    // On timeout/network error during polling: retry silently up to 3 times
+    // before surfacing an error to the UI
+    retry: (failureCount, error: unknown) => {
+      const msg = (error as Error)?.message ?? "";
+      const isTimeout = msg.includes("timeout") || msg.includes("Network Error");
+      return isTimeout && failureCount < 3;
+    },
+    retryDelay: (attempt) => Math.min(2000 * (attempt + 1), 8000),
   });
 }
 
