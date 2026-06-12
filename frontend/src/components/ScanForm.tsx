@@ -2,43 +2,21 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Shield, Search, AlertCircle, Loader2, Lock } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Shield, Search, AlertCircle, Loader2, Lock, FlaskConical } from "lucide-react";
 import { useCreateScan } from "@/hooks/useScans";
-
-// ---------------------------------------------------------------------------
-// Target validation + normalization
-// ---------------------------------------------------------------------------
+import { cn } from "@/lib/utils";
 
 const _LABEL_RE = /^[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?$/;
 
-/**
- * Returns true for any of:
- *   8.8.8.8             bare IPv4
- *   8.8.8.8:8080        IPv4 + port
- *   example.com         domain
- *   example.com:3000    domain + port
- *   http(s)://...       full URL
- *   juiceshop           Docker service name (single label, no TLD required)
- *   localhost:3000      local dev target
- */
 function isValidTarget(value: string): boolean {
   if (!value.trim()) return false;
-
   let rest = value.trim();
-
-  // Scheme check
   if (rest.includes("://")) {
     const scheme = rest.split("://")[0].toLowerCase();
     if (scheme !== "http" && scheme !== "https") return false;
     rest = rest.split("://")[1];
   }
-
-  // Strip path + query
   rest = rest.split("/")[0].split("?")[0].split("#")[0];
-
-  // Port
   let host = rest;
   if (rest.split(":").length === 2) {
     const [h, portStr] = rest.split(":");
@@ -48,79 +26,49 @@ function isValidTarget(value: string): boolean {
       host = h;
     }
   }
-
   if (!host) return false;
-
-  // IPv4
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
     return host.split(".").every((seg) => {
       const n = parseInt(seg, 10);
       return !isNaN(n) && n >= 0 && n <= 255;
     });
   }
-
-  // Hostname / domain / Docker service name
   return host.split(".").every((lbl) => _LABEL_RE.test(lbl));
 }
 
-/**
- * Add http:// when no scheme is present and target is not a bare IPv4.
- * Bare IPs stay as-is (Nmap and other network tools need them without scheme).
- */
 function normalizeTarget(value: string): string {
   const v = value.trim();
   if (!v) return v;
-  if (v.toLowerCase().startsWith("http://") || v.toLowerCase().startsWith("https://")) {
-    return v;
-  }
-  // Bare IPv4 (with or without port) → no scheme
+  if (v.toLowerCase().startsWith("http://") || v.toLowerCase().startsWith("https://")) return v;
   const bareHost = v.split(":")[0];
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bareHost)) return v;
-  // Domain / Docker hostname → add http://
   return `http://${v}`;
 }
 
 function validateTarget(value: string): string | null {
   if (!value.trim()) return "Please enter an IP, domain, or URL";
-  if (!isValidTarget(value.trim())) {
+  if (!isValidTarget(value.trim()))
     return "Invalid target — accepted: 8.8.8.8 · example.com · http://host:3000 · juiceshop";
-  }
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export default function ScanForm() {
   const router = useRouter();
-  const [target, setTarget] = useState("");
-  const [validationError, setValidationError] = useState<string | null>(null);
-
+  const [target, setTarget]           = useState("");
+  const [validationError, setVError]  = useState<string | null>(null);
+  const [labMode, setLabMode]         = useState(true);
   const createScan = useCreateScan();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const error = validateTarget(target);
-    if (error) {
-      setValidationError(error);
-      return;
-    }
-    setValidationError(null);
-
+    const err = validateTarget(target);
+    if (err) { setVError(err); return; }
+    setVError(null);
     try {
-      // Authentication is fully automatic server-side (Phase 1.5):
-      // auto-detect + auto-register a random account + default credentials.
-      // No manual credentials sent from the UI.
-      const scan = await createScan.mutateAsync({
-        target: normalizeTarget(target.trim()),
-      });
+      const scan = await createScan.mutateAsync({ target: normalizeTarget(target.trim()), lab_mode: labMode });
       setTarget("");
       router.push(`/dashboard/scans/${scan.id}`);
-    } catch (err) {
-      // Error shown via mutation state
-    }
+    } catch (_) { /* shown via mutation state */ }
   };
 
   const isLoading = createScan.isPending;
@@ -130,70 +78,92 @@ export default function ScanForm() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="flex gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600" />
+            <input
               type="text"
               placeholder="8.8.8.8 · example.com · http://host:3000"
               value={target}
-              onChange={(e) => {
-                setTarget(e.target.value);
-                if (validationError) setValidationError(null);
-              }}
-              className="pl-10 bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500 focus:border-cyan-500 focus:ring-cyan-500 h-12 text-base"
+              onChange={(e) => { setTarget(e.target.value); if (validationError) setVError(null); }}
+              className={cn(
+                "w-full pl-10 pr-3 h-11 rounded-lg text-[13px] font-mono",
+                "bg-zinc-800/50 border text-zinc-100 placeholder-zinc-600",
+                "transition-all duration-150 outline-none",
+                validationError
+                  ? "border-red-700/60 focus:border-red-600/50 focus:ring-1 focus:ring-red-500/15"
+                  : "border-zinc-700 input-glow"
+              )}
               disabled={isLoading}
               autoFocus
             />
           </div>
-          <Button
+          <button
             type="submit"
             disabled={isLoading || !target.trim()}
-            className="h-12 px-6 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-base transition-all duration-200 disabled:opacity-50"
+            className="h-11 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-[13px] transition-all disabled:opacity-50 btn-glow flex items-center gap-2"
           >
             {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Scanning…
-              </>
+              <><Loader2 className="w-4 h-4 animate-spin" />Scanning…</>
             ) : (
-              <>
-                <Shield className="mr-2 h-4 w-4" />
-                Scan
-              </>
+              <><Shield className="w-4 h-4" />Scan</>
             )}
-          </Button>
+          </button>
         </div>
 
-        {/* ── Authentication: fully automatic (no manual input) ── */}
-        <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-md border border-cyan-500/20 bg-cyan-500/5">
-          <Lock className="h-4 w-4 text-cyan-400 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-indigo-900/40 bg-indigo-950/20">
+          <Lock className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm text-slate-200">Authentification automatique</p>
-            <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-              Le scanner détecte le type d'auth, crée un compte de test aléatoire ou
-              teste des identifiants par défaut, puis propage la session à ZAP, Nuclei,
-              FFUF et SQLMap. Aucune saisie requise.
+            <p className="text-[12px] text-indigo-400 font-medium">Authentification automatique</p>
+            <p className="text-[11px] text-indigo-400/50 mt-0.5 leading-relaxed">
+              Le scanner détecte le type d&apos;auth, crée un compte de test aléatoire ou teste des identifiants
+              par défaut, puis propage la session à ZAP, Nuclei, FFUF et SQLMap.
             </p>
           </div>
         </div>
 
-        {/* Validation error */}
+        {/* Lab mode toggle */}
+        <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-zinc-800 bg-zinc-900/40">
+          <div className="flex items-center gap-2.5">
+            <FlaskConical className={cn("w-3.5 h-3.5 shrink-0", labMode ? "text-violet-400" : "text-zinc-600")} />
+            <div>
+              <p className={cn("text-[12px] font-medium", labMode ? "text-violet-300" : "text-zinc-500")}>
+                Lab Challenge API
+              </p>
+              <p className="text-[11px] text-zinc-600 mt-0.5">
+                {labMode
+                  ? "Hints de vulnérabilités via l'API de la cible (Juice Shop, DVWA…)"
+                  : "Détection 100% active — aucun hint applicatif"}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLabMode((v) => !v)}
+            className={cn(
+              "relative shrink-0 w-9 h-5 rounded-full transition-colors duration-200",
+              labMode ? "bg-violet-600" : "bg-zinc-700"
+            )}
+          >
+            <span className={cn(
+              "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200",
+              labMode ? "translate-x-4" : "translate-x-0"
+            )} />
+          </button>
+        </div>
+
         {validationError && (
-          <div className="flex items-center gap-2 text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-md px-3 py-2">
-            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          <div className="flex items-center gap-2 text-red-400 text-[12px] bg-red-950/40 border border-red-900/50 rounded-lg px-3 py-2 fade-in">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             {validationError}
           </div>
         )}
-
-        {/* API error */}
         {createScan.isError && (
-          <div className="flex items-center gap-2 text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-md px-3 py-2">
-            <AlertCircle className="h-4 w-4 flex-shrink-0" />
-            {createScan.error?.message || "Failed to start scan. Please try again."}
+          <div className="flex items-center gap-2 text-red-400 text-[12px] bg-red-950/40 border border-red-900/50 rounded-lg px-3 py-2 fade-in">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            {createScan.error?.message || "Failed to start scan."}
           </div>
         )}
       </form>
-
-      <p className="mt-3 text-center text-xs text-slate-500">
+      <p className="mt-3 text-center text-[11px] text-zinc-700">
         IPv4 · domaine · URL · hostname Docker (juiceshop) · port optionnel (:3000)
       </p>
     </div>

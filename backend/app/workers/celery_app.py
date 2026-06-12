@@ -43,8 +43,10 @@ celery_app.conf.update(
     # ── Timeouts ─────────────────────────────────────────────────────────────
     # Soft limit: task receives SoftTimeLimitExceeded → can clean up
     # Hard limit: SIGKILL after this
-    task_soft_time_limit = 3600,  # 60 min soft limit
-    task_time_limit      = 3900,  # 65 min hard limit (5 min grace)
+    # Phase circuit breakers (FIX 2) ensure scan finishes in ~15min max.
+    # 25min hard limit leaves ample margin and reduces ghost-process window.
+    task_soft_time_limit = 1200,  # 20 min soft limit
+    task_time_limit      = 1500,  # 25 min hard limit
 
     # ── Retry defaults ────────────────────────────────────────────────────────
     task_max_retries          = 3,

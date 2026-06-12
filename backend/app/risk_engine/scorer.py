@@ -1,22 +1,28 @@
 """
-Risk Engine — scoring multi-facteurs amélioré v2.
+Risk Engine — scoring multi-facteurs v4.
 
 Formule pondérée (total = 100%) :
-  Nuclei CVE findings          28%
-  ZAP web vulnerabilities      18%
-  AbuseIPDB threat intel       13%
-  VirusTotal threat intel       8%
-  Exploitability (Correl.)     10%
-  Port exposure                 7%
-  CVE severity factor           5%
-  Service exposure factor       4%
-  Sensitive endpoints (FFUF)    4%
-  Network reachability bonus    3%
+  Nuclei CVE findings          20%
+  ZAP web vulnerabilities      17%
+  AbuseIPDB threat intel       11%
+  Wapiti web app vulns         13%
+  Exploitability (Correl.)      8%
+  Port exposure                 6%
+  VirusTotal threat intel       7%
+  CVE severity factor           4%
+  Service exposure factor       3%
+  Sensitive endpoints (FFUF)    3%
+  Nikto server misconfigs       6%
+  Network reachability bonus    2%
                                ───
                                100%
 
-Anti-underestimation : si un facteur est critique (ex : CVE 9.0, AbuseIPDB >80%),
-le score final est relevé au moins au niveau MEDIUM (40).
+Anti-underestimation guards (v4) :
+  CVE critique (CVSS ≥ 9)  → score min 75
+  AbuseIPDB > 80% ou VT > 50%  → score min 60
+  Service dangereux exposé      → score min 50
+  Corr. high confirmé           → score min 50
+  Corr. critical confirmé       → score min 75
 """
 from __future__ import annotations
 
@@ -179,6 +185,32 @@ def _f_network_reachability(nmap_data: Dict[str, Any]) -> float:
     return 10.0
 
 
+def _f_nikto(nikto_data: Dict[str, Any]) -> float:
+    if nikto_data.get("error") or nikto_data.get("skipped"):
+        return 0.0
+    by_sev = nikto_data.get("by_severity", {})
+    return min(
+        by_sev.get("critical", 0) * 30
+        + by_sev.get("high",    0) * 15
+        + by_sev.get("medium",  0) * 5
+        + by_sev.get("low",     0) * 1,
+        100.0,
+    )
+
+
+def _f_wapiti(wapiti_data: Dict[str, Any]) -> float:
+    if wapiti_data.get("error") or wapiti_data.get("skipped"):
+        return 0.0
+    by_sev = wapiti_data.get("by_severity", {})
+    return min(
+        by_sev.get("critical", 0) * 30
+        + by_sev.get("high",    0) * 15
+        + by_sev.get("medium",  0) * 5
+        + by_sev.get("low",     0) * 1,
+        100.0,
+    )
+
+
 # ── Scoring principal ────────────────────────────────────────────────────────
 
 
@@ -205,6 +237,8 @@ def compute_enhanced_risk_score(
     vt_data      = ctx.get_step_result("virustotal") or {}
     nmap_data    = ctx.get_step_result("nmap")       or {}
     ffuf_data    = ctx.get_step_result("ffuf")       or {}
+    nikto_data   = ctx.get_step_result("nikto")      or {}
+    wapiti_data  = ctx.get_step_result("wapiti")     or {}
 
     cr = correlation_report or {}
 
@@ -217,50 +251,54 @@ def compute_enhanced_risk_score(
     f_svc_exp   = _f_service_exposure(nmap_data)
     f_endpoints = _f_sensitive_endpoints(ffuf_data)
     f_network   = _f_network_reachability(nmap_data)
+    f_nikto     = _f_nikto(nikto_data)
+    f_wapiti    = _f_wapiti(wapiti_data)
 
     # Facteurs du Correlation Engine
     f_exploit    = float(cr.get("exploitability_score", 0.0))
     confidence   = float(cr.get("confidence_score", 50.0))
     threat_intel = float(cr.get("threat_intel_factor", 0.0))
 
-    # Formule pondérée (= 100%)
+    # Formule pondérée v4 (= 100%)
+    # Nuclei réduit à 20%, Wapiti monté à 13%, ZAP à 17% pour mieux refléter
+    # les vulnérabilités web (XSS, SQLi) sans CVE associé.
     score = (
-        f_nuclei    * 0.28
-        + f_zap     * 0.18
-        + f_abuse   * 0.13
-        + f_vt      * 0.08
-        + f_exploit * 0.10
-        + f_port    * 0.07
-        + f_cve_sev * 0.05
-        + f_svc_exp * 0.04
-        + f_endpoints * 0.04
-        + f_network * 0.03
+        f_nuclei    * 0.20
+        + f_zap     * 0.17
+        + f_abuse   * 0.11
+        + f_vt      * 0.07
+        + f_exploit * 0.08
+        + f_port    * 0.06
+        + f_cve_sev * 0.04
+        + f_svc_exp * 0.03
+        + f_endpoints * 0.03
+        + f_network * 0.02
+        + f_nikto   * 0.06
+        + f_wapiti  * 0.13
     )
 
     # ── Anti-underestimation guards — scanners (CVE / threat intel) ─────────
-    # Critical CVE always yields at least HIGH score (60)
+    # Critical CVE → score minimum HIGH (75)
     if f_cve_sev >= 100.0:
-        score = max(score, 65.0)
-    # Active abuse signals → at least MEDIUM (40)
+        score = max(score, 75.0)
+    # Active abuse/VT signals → au moins MEDIUM-HIGH (60)
     if f_abuse > 80.0 or f_vt > 50.0:
-        score = max(score, 45.0)
-    # Dangerous exposed services → at least LOW (20)
+        score = max(score, 60.0)
+    # Dangerous exposed services (RDP, telnet, Redis...) → au moins MEDIUM (50)
     if f_svc_exp > 70.0:
-        score = max(score, 30.0)
-    # Accessible target with open ports and no findings → at least minimal
+        score = max(score, 50.0)
+    # Accessible target with open ports and no findings → au moins minimal
     if f_network > 30.0 and score < 10.0:
         score = 10.0
 
     # ── Anti-underestimation guards — correlated findings severity ───────────
-    # Si le Correlation Engine a confirmé des findings, le score ne peut pas
-    # rester sous le seuil correspondant à leur sévérité maximale.
     corr_by_sev = cr.get("by_severity", {})
     if corr_by_sev.get("medium", 0) >= 1:
-        score = max(score, 20.0)   # medium confirmed → au moins LOW (20)
+        score = max(score, 25.0)   # medium confirmed → au moins LOW (25)
     if corr_by_sev.get("high", 0) >= 1:
-        score = max(score, 40.0)   # high confirmed   → au moins MEDIUM (40)
+        score = max(score, 50.0)   # high confirmed   → au moins MEDIUM-HIGH (50)
     if corr_by_sev.get("critical", 0) >= 1:
-        score = max(score, 60.0)   # critical          → au moins HIGH (60)
+        score = max(score, 75.0)   # critical          → au moins HIGH (75)
 
     final = min(int(score), 100)
 
@@ -277,6 +315,8 @@ def compute_enhanced_risk_score(
             "service_exposure": round(f_svc_exp,   2),
             "endpoint_risk":    round(f_endpoints, 2),
             "network_reach":    round(f_network,   2),
+            "nikto":            round(f_nikto,     2),
+            "wapiti":           round(f_wapiti,    2),
         },
         "confidence_score":           round(confidence,   2),
         "exploitability_score":       round(f_exploit,    2),

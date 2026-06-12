@@ -1,13 +1,3 @@
-"""
-Dalfox microservice — XSS Detection (défensif, assessment uniquement).
-
-POST /scan   → analyse XSS sur l'URL cible
-GET  /health → liveness
-
-Dalfox est utilisé en mode assessment : il détecte les points d'injection
-potentiels et vérifie si des payloads XSS peuvent être reflétés,
-sans exploitation réelle (mode --only-discovery + payload validation).
-"""
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +26,8 @@ class ScanRequest(BaseModel):
     target: str
     timeout: int = 120
     deep_mode: bool = False
+    urls: Optional[List[str]] = None
+    auth_headers: Optional[Dict[str, str]] = None
 
     @field_validator("target")
     @classmethod
@@ -46,7 +38,7 @@ class ScanRequest(BaseModel):
         return v
 
 
-async def _run_dalfox(url: str, timeout: int, deep_mode: bool) -> Dict[str, Any]:
+async def _run_dalfox(url: str, timeout: int, deep_mode: bool, auth_headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Exécute dalfox en mode assessment défensif."""
     cmd = [
         "dalfox",
@@ -60,6 +52,10 @@ async def _run_dalfox(url: str, timeout: int, deep_mode: bool) -> Dict[str, Any]
     if not deep_mode:
         # Mode léger : uniquement détection de réflexion, pas d'exploitation
         cmd.extend(["--only-discovery"])
+
+    if auth_headers:
+        for hname, hval in auth_headers.items():
+            cmd.extend(["--header", f"{hname}: {hval}"])
 
     findings: List[Dict[str, Any]] = []
     raw_output = ""
@@ -130,14 +126,21 @@ async def health() -> JSONResponse:
 
 @app.post("/scan")
 async def scan(req: ScanRequest) -> JSONResponse:
-    start = time.time()
-    logger.info("Dalfox scan: %s (deep=%s)", req.target, req.deep_mode)
+    start       = time.time()
+    targets     = req.urls if req.urls else [req.target]
+    per_timeout = max(10, req.timeout // len(targets))
+    logger.info("Dalfox scan: %d URL(s) (deep=%s)", len(targets), req.deep_mode)
 
-    result = await _run_dalfox(req.target, req.timeout, req.deep_mode)
-    elapsed = round(time.time() - start, 2)
+    all_raw:    List[Dict[str, Any]] = []
+    last_error: Optional[str]        = None
+    for url in targets:
+        res = await _run_dalfox(url, per_timeout, req.deep_mode, req.auth_headers)
+        if res.get("error"):
+            last_error = res["error"]
+        all_raw.extend(res.get("findings") or [])
 
-    raw_findings = result.get("findings") or []
-    normalized = [_normalize_finding(f) for f in raw_findings]
+    elapsed    = round(time.time() - start, 2)
+    normalized = [_normalize_finding(f) for f in all_raw]
 
     by_severity: Dict[str, int] = {}
     for f in normalized:
@@ -150,7 +153,7 @@ async def scan(req: ScanRequest) -> JSONResponse:
         "total":           len(normalized),
         "by_severity":     by_severity,
         "elapsed_seconds": elapsed,
-        "error":           result.get("error"),
+        "error":           last_error,
     })
 
 

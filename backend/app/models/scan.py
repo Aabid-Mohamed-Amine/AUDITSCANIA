@@ -3,7 +3,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, Integer, Text, DateTime, Enum as SAEnum, JSON, Uuid, ForeignKey,
+    Column, String, Integer, Text, DateTime, Enum as SAEnum, JSON, Uuid, ForeignKey, Boolean,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -83,6 +83,9 @@ class Scan(Base):
 
     # Risk score 0-100 (computed after all recon)
     risk_score = Column(Integer, nullable=True)
+
+    # Detection mode toggle (lab_mode=True → Lab Challenge API hints enabled)
+    lab_mode = Column(Boolean, nullable=False, default=True, server_default="true")
 
     # Error message if status == failed
     error_message = Column(Text, nullable=True)

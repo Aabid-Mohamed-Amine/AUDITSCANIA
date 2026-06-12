@@ -1,14 +1,3 @@
-"""
-Nuclei vulnerability scanner microservice v2.
-
-Améliorations :
-  - Tech detection intégrée via httpx Python (si aucun contexte fourni)
-  - Tags ET template IDs combinés (Nuclei supporte les deux simultanément)
-  - Couverture élargie : exposures, misconfigurations, CVEs, panels,
-    cloud buckets, API exposure, default-logins
-  - Mapping tech → tags pour templates pertinents uniquement
-  - Corrélation CVE ↔ technologie détectée
-"""
 from __future__ import annotations
 
 import asyncio
@@ -149,7 +138,7 @@ _CATEGORY_TAGS: Dict[str, List[str]] = {
 
 class ScanRequest(BaseModel):
     target:          str
-    severity:        str            = "low,medium,high,critical"
+    severity:        str            = "info,low,medium,high,critical"
     timeout:         int            = 600
     templates:       Optional[List[str]] = None
     tags:            Optional[List[str]] = None
@@ -293,57 +282,70 @@ def _build_tag_set(
     return sorted(tag_set)
 
 
-def _is_web_target(target: str) -> bool:
-    return target.startswith(("http://", "https://"))
+def _build_base_cmd(output_path: str, severity: str) -> List[str]:
+    """Construit les arguments communs à toutes les commandes Nuclei."""
+    return [
+        "nuclei",
+        "-o",            output_path,
+        "-json",
+        "-severity",     severity,
+        "-silent",
+        "-no-color",
+        "-no-interactsh",
+        "-timeout",      "10",
+        "-rate-limit",   "20",
+        "-bulk-size",    "10",
+        "-c",            "10",
+        "-retries",      "1",
+    ]
 
 
-# ---------------------------------------------------------------------------
-# Nuclei command builder
-# ---------------------------------------------------------------------------
+def _add_auth_flags(cmd: List[str], headers: Optional[Dict[str, str]], cookies: Optional[Dict[str, str]]) -> None:
+    """Injecte les headers d'auth dans une commande Nuclei (modification en place)."""
+    if headers:
+        for hname, hval in headers.items():
+            cmd.extend(["-H", f"{hname}: {hval}"])
+    if cookies:
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        cmd.extend(["-H", f"Cookie: {cookie_str}"])
 
 
-def _build_cmd(
+def _build_cmd_templates(
+    req:           ScanRequest,
+    output_path:   str,
+    targets_file:  Optional[str] = None,
+) -> List[str]:
+    cmd = _build_base_cmd(output_path, req.severity)
+    if targets_file:
+        cmd.extend(["-l", targets_file])
+    else:
+        cmd.extend(["-u", req.target])
+    cmd += ["-t", "http/misconfiguration/"]
+    _add_auth_flags(cmd, req.headers, req.cookies)
+    return cmd
+
+
+def _build_cmd_tags(
     req:           ScanRequest,
     output_path:   str,
     tags:          List[str],
     targets_file:  Optional[str] = None,
 ) -> List[str]:
-    cmd: List[str] = [
-        "nuclei",
-        "-o",            output_path,
-        "-json",
-        "-severity",     req.severity,
-        "-silent",
-        "-no-color",
-        "-timeout",      "10",
-        "-rate-limit",   "100",
-        "-bulk-size",    "25",
-        "-c",            "25",
-        "-retries",      "1",
-    ]
-
+    cmd = _build_base_cmd(output_path, req.severity)
     if targets_file:
         cmd.extend(["-l", targets_file])
     else:
         cmd.extend(["-u", req.target])
-
-    if req.templates and tags:
-        cmd.extend(["-id", ",".join(req.templates)])
+    if tags:
         cmd.extend(["-tags", ",".join(tags)])
-    elif req.templates:
+    if req.templates:
         cmd.extend(["-id", ",".join(req.templates)])
-    elif tags:
-        cmd.extend(["-tags", ",".join(tags)])
-
-    # ── Auth injection via -H flags ────────────────────────────────────────
-    if req.headers:
-        for hname, hval in req.headers.items():
-            cmd.extend(["-H", f"{hname}: {hval}"])
-    if req.cookies:
-        cookie_str = "; ".join(f"{k}={v}" for k, v in req.cookies.items())
-        cmd.extend(["-H", f"Cookie: {cookie_str}"])
-
+    _add_auth_flags(cmd, req.headers, req.cookies)
     return cmd
+
+
+def _is_web_target(target: str) -> bool:
+    return target.startswith(("http://", "https://"))
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +418,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "error":           None,
     }
 
-    # ── 1. Tech detection if not provided ────────────────────────────────────
+    # —— 1. Tech detection if not provided ———————————————————————————
     tech_stack = req.tech_stack or []
     if not tech_stack and _is_web_target(req.target):
         try:
@@ -426,7 +428,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         except Exception as exc:
             logger.warning("Tech detection failed: %s", exc)
 
-    # ── 2. Build tag set ──────────────────────────────────────────────────────
+    # —— 2. Build tag set ————————————————————————————————————
     tags = _build_tag_set(
         req_tags        = req.tags,
         tech_stack      = tech_stack,
@@ -436,66 +438,109 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     result["tags_used"] = tags
     logger.info("Final Nuclei tags (%d): %s", len(tags), tags)
 
-    # ── 3. Build targets file ─────────────────────────────────────────────────
-    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp:
-        output_path = tmp.name
-
+    # —— 3. Build targets file ——————————————————————————————————
     targets_file: Optional[str] = None
     if req.extra_targets:
         all_targets = [req.target] + [t for t in req.extra_targets if t and t != req.target]
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tf:
-            tf.write("\n".join(all_targets[:100]))  # cap at 100 targets
+            tf.write("\n".join(all_targets[:100]))
             targets_file = tf.name
         logger.info("Scanning %d targets", len(all_targets))
 
-    # ── 4. Run Nuclei ─────────────────────────────────────────────────────────
-    cmd = _build_cmd(req, output_path, tags, targets_file)
-    logger.info("Nuclei cmd: %s", " ".join(cmd[:20]) + "...")
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp1:
+        output_path1 = tmp1.name
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp2:
+        output_path2 = tmp2.name
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+    cmd1 = _build_cmd_templates(req, output_path1, targets_file)
+
+    _GENERIC_TAGS = {"http", "javascript"}
+    useful_tags = [t for t in tags if t not in _GENERIC_TAGS]
+    if len(useful_tags) < 2:
+        logger.info(
+            "[Nuclei] cmd2 skipped — only %d useful tags after filtering generic tags (http, javascript)",
+            len(useful_tags),
         )
-        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=req.timeout)
+        cmd2: Optional[List[str]] = None
+    else:
+        cmd2 = _build_cmd_tags(req, output_path2, useful_tags, targets_file)
 
-        stderr_text = (stderr_bytes or b"").decode(errors="replace").strip()
-        if stderr_text:
-            logger.debug("Nuclei stderr: %s", stderr_text[:500])
+    logger.info("Nuclei cmd1 (templates): %s", " ".join(cmd1[:15]) + "...")
+    if cmd2:
+        logger.info("Nuclei cmd2 (tags):      %s", " ".join(cmd2[:15]) + "...")
+    else:
+        logger.info("Nuclei cmd2 (tags):      skipped (insufficient useful tags)")
 
-        if proc.returncode not in (0, 1):
-            result["error"] = stderr_text[:500]
+    errors: List[str] = []
+    _CMD_TIMEOUT = 90
 
-    except asyncio.TimeoutError:
-        try: proc.kill()
-        except Exception: pass
-        result["error"] = f"Nuclei scan timed out after {req.timeout}s"
-        logger.warning("Scan timed out for %s", req.target)
-        return result
-    except Exception as exc:
-        result["error"] = str(exc)
-        logger.exception("Nuclei scan failed for %s", req.target)
-        return result
+    async def _run_cmd(cmd: List[str], label: str) -> None:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=_CMD_TIMEOUT)
+            stderr_text = (stderr_bytes or b"").decode(errors="replace").strip()
+            if stderr_text:
+                logger.debug("Nuclei %s stderr: %s", label, stderr_text[:300])
+            if proc.returncode == 2:
+                # exit 2 = target unresponsive/skipped — résultats partiels conservés
+                logger.warning("[Nuclei] %s exited with code 2 (target unresponsive or no templates matched)", label)
+            elif proc.returncode not in (0, 1):
+                errors.append(f"{label}: exit {proc.returncode} — {stderr_text[:200]}")
+        except asyncio.TimeoutError:
+            try: proc.kill()
+            except Exception: pass
+            # Résultats partiels déjà streamés dans le fichier de sortie — pas un échec total
+            logger.warning("[Nuclei] cmd timeout 90s — résultats partiels conservés (%s)", label)
+        except Exception as exc:
+            errors.append(f"{label}: {exc}")
+            logger.exception("Nuclei %s failed for %s", label, req.target)
 
-    # ── 5. Parse output ───────────────────────────────────────────────────────
+    # Lancer les commandes (cmd2 peut être sautée)
+    gather_tasks = [_run_cmd(cmd1, "cmd1-templates")]
+    if cmd2:
+        gather_tasks.append(_run_cmd(cmd2, "cmd2-tags"))
+    await asyncio.gather(*gather_tasks)
+
+    if errors:
+        result["error"] = " | ".join(errors)
+
+    # —— 5. Parse + fusion + déduplication par template_id —————————————
     findings: List[Dict[str, Any]] = []
-    try:
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            with open(output_path, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if line:
+    seen_template_ids: set = set()
+
+    def _parse_output(path: str) -> None:
+        try:
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                with open(path, encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
                         try:
-                            findings.append(_slim_finding(json.loads(line)))
+                            raw = json.loads(line)
+                            slim = _slim_finding(raw)
+                            tid = slim.get("template_id", "")
+                            if tid and tid in seen_template_ids:
+                                continue  # déduplication par template_id
+                            if tid:
+                                seen_template_ids.add(tid)
+                            findings.append(slim)
                         except (json.JSONDecodeError, KeyError):
                             pass
-    finally:
-        try: os.unlink(output_path)
-        except Exception: pass
-        if targets_file:
-            try: os.unlink(targets_file)
+        finally:
+            try: os.unlink(path)
             except Exception: pass
+
+    _parse_output(output_path1)
+    _parse_output(output_path2)
+
+    if targets_file:
+        try: os.unlink(targets_file)
+        except Exception: pass
 
     _sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "unknown": 5}
     findings.sort(key=lambda f: _sev_order.get(f.get("severity", "unknown"), 5))

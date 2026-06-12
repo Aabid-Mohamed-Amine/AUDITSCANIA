@@ -27,10 +27,13 @@ logger = logging.getLogger(__name__)
 # ── Sources "actives" (interaction directe avec la cible) ─────────────────────
 _ACTIVE_SOURCES = {
     "nuclei", "nmap", "zap", "dalfox", "sqlmap", "httpx",
-    "ffuf",     # endpoint discovery
-    "katana",   # JS crawling
-    "gitleaks", # secrets detection
-    "trivy",    # supply chain
+    "ffuf",              # endpoint discovery
+    "katana",            # JS crawling
+    "gitleaks",          # secrets detection
+    "trivy",             # supply chain
+    "lab_challenge_api", # vulnerable lab challenge metadata
+    "nikto",             # web server scanner — actif
+    "wapiti",            # web app scanner — actif
 }
 
 _PASSIVE_SOURCES = {"shodan", "virustotal", "abuseipdb", "subfinder"}
@@ -251,6 +254,7 @@ def reduce_false_positives(
     findings:    List[Dict[str, Any]],
     service_map: Optional[Dict[int, Dict[str, str]]] = None,
     config:      Optional[Dict[str, Any]] = None,
+    lab_mode:    bool = True,
 ) -> Dict[str, Any]:
     """
     Classifies findings into confirmed / suspicious / informational tiers.
@@ -336,9 +340,10 @@ def reduce_false_positives(
         "context":             sum(1 for f in all_findings if f.get("fp_context") != "ok"),
     }
 
+    _mode_tag = "[lab mode]" if lab_mode else "[active mode]"
     logger.info(
-        "FP Engine v2: %d findings → confirmed=%d suspicious=%d informational=%d (merged=%d)",
-        original_count, len(confirmed), len(suspicious), len(informational), merge_count,
+        "FP Analysis: %d findings → confirmed=%d suspicious=%d informational=%d (merged=%d) %s",
+        original_count, len(confirmed), len(suspicious), len(informational), merge_count, _mode_tag,
     )
 
     return {

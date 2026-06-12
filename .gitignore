@@ -1,13 +1,14 @@
 # ---- Python ----
 __pycache__/
 *.py[cod]
+*.pyc
+*.pyo
 .venv/
 venv/
 .pytest_cache/
 htmlcov/
 .coverage
 *.log
-test.db
 
 # ---- Node / Next.js ----
 node_modules/
@@ -19,6 +20,15 @@ next-env.d.ts
 .env
 .env.*
 !.env.example
+
+# ---- Docker volumes ----
+postgres_data/
+redis_data/
+nuclei_templates/
+trivy_db/
+
+# ---- DB files ----
+*.db
 
 # ---- OS ----
 .DS_Store

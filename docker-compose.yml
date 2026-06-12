@@ -1,5 +1,5 @@
 # AuditScan IA — Professional SaaS Cybersecurity Platform
-# Architecture: 12 microservices + 3 testing environments
+# Architecture: 14 microservices + 3 testing environments
 #
 # Usage:
 #   docker compose up --build               → full stack
@@ -43,7 +43,7 @@ services:
     networks:
       - auditscan_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auditscan}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auditscan} -d ${POSTGRES_DB:-auditscan_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -116,8 +116,8 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:9002/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 240s
 
   # ── Subfinder + httpx — Asset Discovery ──────────────────────────────────
   subfinder:
@@ -209,6 +209,36 @@ services:
       retries: 3
       start_period: 30s
 
+  # ── Nikto — Web Server Scanner ───────────────────────────────────────────
+  nikto:
+    build:
+      context: ./nikto
+    image: auditscan-nikto:dev
+    restart: unless-stopped
+    networks:
+      - auditscan_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── Wapiti — Web Application Auditor ─────────────────────────────────────
+  wapiti:
+    build:
+      context: ./wapiti
+    image: auditscan-wapiti:dev
+    restart: unless-stopped
+    networks:
+      - auditscan_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
   # ── Trivy — Supply Chain / Container Scanner ──────────────────────────────
   trivy:
     build:
@@ -237,6 +267,9 @@ services:
     image: auditscan-backend:dev
     restart: unless-stopped
     env_file: .env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     deploy:
       resources:
         limits:
@@ -250,6 +283,8 @@ services:
       FFUF_URL:      http://ffuf:9006
       SQLMAP_URL:    http://sqlmap:9007
       GITLEAKS_URL:  http://gitleaks:9008
+      NIKTO_URL:     http://nikto:9010
+      WAPITI_URL:    http://wapiti:9011
     depends_on:
       postgres:
         condition: service_healthy
@@ -282,6 +317,9 @@ services:
       --hostname=worker-fast@%h
       --max-tasks-per-child=10
     env_file: .env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       SUBFINDER_URL: http://subfinder:9003
       DALFOX_URL:    http://dalfox:9004
@@ -290,37 +328,19 @@ services:
       SQLMAP_URL:    http://sqlmap:9007
       GITLEAKS_URL:  http://gitleaks:9008
       KATANA_URL:    http://katana:9009
+      NIKTO_URL:     http://nikto:9010
+      WAPITI_URL:    http://wapiti:9011
       WORKER_TYPE:   fast
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 1536M
         reservations:
           memory: 256M
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-      nmap:
-        condition: service_healthy
-      nuclei:
-        condition: service_healthy
-      zap:
-        condition: service_healthy
-      subfinder:
-        condition: service_healthy
-      dalfox:
-        condition: service_healthy
-      ffuf:
-        condition: service_healthy
-      sqlmap:
-        condition: service_healthy
-      gitleaks:
-        condition: service_healthy
-      katana:
         condition: service_healthy
     networks:
       - auditscan_net
@@ -340,6 +360,9 @@ services:
       --hostname=worker-slow@%h
       --max-tasks-per-child=5
     env_file: .env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       SUBFINDER_URL: http://subfinder:9003
       DALFOX_URL:    http://dalfox:9004
@@ -348,13 +371,15 @@ services:
       SQLMAP_URL:    http://sqlmap:9007
       GITLEAKS_URL:  http://gitleaks:9008
       KATANA_URL:    http://katana:9009
+      NIKTO_URL:     http://nikto:9010
+      WAPITI_URL:    http://wapiti:9011
       WORKER_TYPE:   slow
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 768M
         reservations:
-          memory: 128M
+          memory: 192M
     depends_on:
       postgres:
         condition: service_healthy
@@ -432,6 +457,11 @@ services:
     restart: unless-stopped
     profiles:
       - testing
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=1536
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 1.5
     networks:
       - auditscan_net
       - testing_net

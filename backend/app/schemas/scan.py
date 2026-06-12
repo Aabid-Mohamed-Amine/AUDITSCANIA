@@ -25,7 +25,7 @@ def _is_valid_target(v: str) -> bool:
       - domain                  example.com
       - domain:port             example.com:3000
       - http(s)://...           http://example.com/path?q=1
-      - Docker DNS hostname     juiceshop  dvwa  webgoat
+      - Docker DNS hostname     myapp  internal-svc  backend
       - localhost[:port]        localhost:3000
     Reject: empty, non-http schemes, invalid ports, malformed hosts.
     """
@@ -121,6 +121,7 @@ class AuthCredentialsSchema(BaseModel):
 class ScanCreate(BaseModel):
     target:      str                              = Field(..., min_length=1, max_length=255, description="IP, domain, URL, or Docker hostname to scan")
     credentials: Optional[AuthCredentialsSchema] = Field(None, description="Optional auth credentials for authenticated scanning")
+    lab_mode:    bool                             = Field(True, description="Use Lab Challenge API hints (true=current behaviour). Set false for pure active detection.")
 
     @field_validator("target")
     @classmethod
@@ -132,7 +133,7 @@ class ScanCreate(BaseModel):
         if not _is_valid_target(normalized):
             raise ValueError(
                 "Invalid target. Accepted: IPv4, IPv4:port, domain, domain:port, "
-                "http(s)://..., Docker hostname (juiceshop, dvwa, localhost:3000)"
+                "http(s)://..., Docker hostname (myapp, internal-svc, localhost:3000)"
             )
         return normalized
 
@@ -184,6 +185,8 @@ class ScanResponse(BaseModel):
     ai_analysis_data: Optional[Dict[str, Any]] = None
     # Auth detection result (Phase 1.5)
     auth_config: Optional[Dict[str, Any]] = None
+    # Detection mode
+    lab_mode: bool = True
 
     model_config = {"from_attributes": True}
 
@@ -192,9 +195,28 @@ class ScanDetailResponse(ScanResponse):
     logs: List[ScanLogEntry] = []
 
 
+class ScanSummary(BaseModel):
+    """
+    Vue allégée pour la LISTE des scans — sans les gros blobs JSON
+    (nmap_data, zap_data, soc_report…). Évite de renvoyer des centaines de Mo
+    quand on liste 50-100 scans. Le détail complet reste sur GET /scans/{id}.
+    """
+    id: uuid.UUID
+    target: str
+    status: str
+    progress: int
+    risk_score: Optional[int] = None
+    current_phase: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ScanListResponse(BaseModel):
     total: int
-    items: List[ScanResponse]
+    items: List[ScanSummary]
 
 
 # ---------------------------------------------------------------------------

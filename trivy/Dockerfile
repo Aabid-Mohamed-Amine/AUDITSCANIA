@@ -11,7 +11,7 @@ COPY --from=trivy-binary /usr/local/bin/trivy /usr/local/bin/trivy
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout=120 -r requirements.txt
 
 COPY main.py .
 

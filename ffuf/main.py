@@ -32,6 +32,44 @@ app = FastAPI(title="FFUF Discovery Microservice", version="3.0.0")
 WORDLIST_MAIN     = "/wordlists/common.txt"
 WORDLIST_FALLBACK = "/wordlists/fallback.txt"
 
+# ── Wordlist de base universelle ──────────────────────────────────────────────
+# Toujours testée, en plus de la wordlist principale, sur N'IMPORTE QUELLE cible.
+# Uniquement des chemins génériques — aucun chemin spécifique à une application.
+_UNIVERSAL_BASE: List[str] = [
+    "robots.txt",
+    ".env",
+    ".git/HEAD",
+    "admin",
+    "dashboard",
+    "metrics",
+    "health",
+    "actuator",
+    "swagger.json",
+    "api-docs",
+    "graphql",
+    "backup",
+    "logs",
+    "server-status",
+    # Variantes génériques courantes (non spécifiques à une app)
+    ".env.local",
+    ".env.production",
+    ".git/config",
+    "actuator/health",
+    "actuator/env",
+    "swagger-ui",
+    "openapi.json",
+    "api",
+    "login",
+    "config",
+    "status",
+    "info",
+    "debug",
+    "phpinfo.php",
+    "server-info",
+    "sitemap.xml",
+    ".htaccess",
+]
+
 _CLOUD_HOSTS = {
     "herokuapp.com", "vercel.app", "netlify.app", "azurewebsites.net",
     "cloudfront.net", "fastly.net", "github.io", "pages.dev",
@@ -147,6 +185,7 @@ class ScanRequest(BaseModel):
     timeout:    int              = 120
     threads:    int              = 40
     extensions: List[str]        = []
+    wordlist:   str              = "auto"   # "auto" | "fallback" | "full"
     # Auth injection (optional)
     headers:    Optional[Dict[str, str]] = None
     cookies:    Optional[Dict[str, str]] = None
@@ -158,6 +197,38 @@ def _wordlist() -> str:
         if os.path.exists(WORDLIST_MAIN) and os.path.getsize(WORDLIST_MAIN) > 1000
         else WORDLIST_FALLBACK
     )
+
+
+def _make_scan_wordlist(base_path: str) -> str:
+    """
+    Construit une wordlist combinée pour le scan : la base universelle
+    (_UNIVERSAL_BASE, toujours testée) en tête, puis la wordlist principale,
+    le tout dédupliqué. Retourne le chemin du fichier temporaire combiné, ou
+    base_path en cas d'échec d'écriture.
+    """
+    combined = f"/tmp/ffuf_wl_{uuid.uuid4().hex[:10]}.txt"
+    seen: set = set()
+    try:
+        with open(combined, "w", encoding="utf-8") as out:
+            for word in _UNIVERSAL_BASE:
+                w = word.strip().lstrip("/")
+                if w and w not in seen:
+                    seen.add(w)
+                    out.write(w + "\n")
+            if os.path.exists(base_path):
+                with open(base_path, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        w = line.strip()
+                        if not w or w.startswith("#"):
+                            continue
+                        key = w.lstrip("/")
+                        if key not in seen:
+                            seen.add(key)
+                            out.write(w + "\n")
+        return combined
+    except Exception as exc:
+        logger.warning("Combined wordlist build failed (%s) — using base wordlist", exc)
+        return base_path
 
 
 def _normalize(target: str) -> str:
@@ -395,8 +466,16 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "error":       None,
     }
 
-    wordlist = _wordlist()
-    exts     = ",".join(f".{e.lstrip('.')}" for e in req.extensions) if req.extensions else ""
+    # "fallback" = petite liste (164 entrées) pour les scans rapides (Phase 2)
+    # "auto" / "full" = liste complète (4750+ entrées) pour les scans détaillés (Phase 3)
+    if req.wordlist == "fallback":
+        base_wordlist = WORDLIST_FALLBACK
+        wordlist      = _make_scan_wordlist(base_wordlist)
+        logger.info("FFUF wordlist: fallback (%s)", base_wordlist)
+    else:
+        base_wordlist = _wordlist()
+        wordlist      = _make_scan_wordlist(base_wordlist)   # base universelle + principale
+    exts          = ",".join(f".{e.lstrip('.')}" for e in req.extensions) if req.extensions else ""
 
     # ── 1. Baseline probe ────────────────────────────────────────────────────
     baseline       = await _get_baseline(target_url)
@@ -411,7 +490,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         # ── 2. Strategy selection ────────────────────────────────────────────
         # Cloud CDN: no -ac (CDN normalizes responses → over-filters)
         # Otherwise: -ac + baseline filters for best coverage
-        use_ac = not is_cloud
+        use_ac = not is_cloud and not filter_flags
 
         stderr = await _run_ffuf(
             fuzz_url, wordlist, req.threads, exts,
@@ -524,6 +603,10 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     finally:
         try: os.unlink(output_file)
         except Exception: pass
+        # Nettoyage de la wordlist combinée temporaire
+        if wordlist != base_wordlist:
+            try: os.unlink(wordlist)
+            except Exception: pass
 
     logger.info(
         "FFUF done — %s | total=%d critical=%d high=%d medium=%d",

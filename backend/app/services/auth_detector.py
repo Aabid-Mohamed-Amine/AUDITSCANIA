@@ -22,6 +22,7 @@ dans ZAP, Nuclei, FFUF et SQLMap.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import re
@@ -217,7 +218,7 @@ def _parse_login_form(html: str) -> Optional[Dict[str, str]]:
 
 # ── HTTP probing ──────────────────────────────────────────────────────────────
 
-async def _get(url: str, timeout: float = 8.0, follow: bool = True) -> Optional[httpx.Response]:
+async def _get(url: str, timeout: float = 15.0, follow: bool = True) -> Optional[httpx.Response]:
     try:
         async with httpx.AsyncClient(
             timeout=timeout, verify=False,
@@ -250,6 +251,7 @@ async def detect_auth_type(target: str, timeout: float = 10.0) -> Dict[str, Any]
     info: Dict[str, Any] = {
         "type": AuthType.NONE, "login_url": None,
         "form_fields": {}, "cookie_names": [], "realm": None, "notes": "",
+        "is_juice_shop": False,
     }
 
     resp = await _get(base, timeout=timeout, follow=True)
@@ -297,8 +299,19 @@ async def detect_auth_type(target: str, timeout: float = 10.0) -> Dict[str, Any]
                 info["form_fields"] = ff
             return info
 
+    # ── Détection app type avant probe — évite de spammer des chemins inconnus
+    # qui génèrent des erreurs fatales (ex: Juice Shop Node.js heap OOM).
+    # Si la page d'accueil mentionne "juice" ou "owasp" → Juice Shop détecté :
+    # on ne teste que /rest/user/login au lieu des ~20 chemins génériques.
+    _body_lower = (resp.text or "").lower() if resp else ""
+    _is_juice_shop = "juice" in _body_lower or "owasp" in _body_lower
+    info["is_juice_shop"] = _is_juice_shop
+    if _is_juice_shop:
+        logger.info("Auth detect: Juice Shop/OWASP détecté sur %s", base)
+
     # ── Probe common login paths ──────────────────────────────────────────
-    probed = await _probe_login_paths(base, timeout=min(timeout, 8.0))
+    probed = await _probe_login_paths(base, timeout=min(timeout, 15.0),
+                                      juice_shop=_is_juice_shop)
     if probed["type"] != AuthType.NONE:
         return {**info, **probed}
 
@@ -310,17 +323,36 @@ async def detect_auth_type(target: str, timeout: float = 10.0) -> Dict[str, Any]
     return info
 
 
-async def _probe_login_paths(base_url: str, timeout: float = 8.0) -> Dict[str, Any]:
-    """Teste les chemins de login courants pour trouver un formulaire."""
+async def _probe_login_paths(
+    base_url:   str,
+    timeout:    float = 15.0,
+    juice_shop: bool  = False,
+) -> Dict[str, Any]:
+    """Teste les chemins de login courants pour trouver un formulaire.
+
+    Si juice_shop=True, teste uniquement /rest/user/login (évite de spammer
+    ~20 chemins inconnus qui saturent le heap Node.js de Juice Shop).
+    Sinon, teste _LOGIN_PATHS complet avec 1s entre chaque requête.
+    """
     result: Dict[str, Any] = {
         "type": AuthType.NONE, "login_url": None, "form_fields": {}, "notes": "",
     }
+    if juice_shop:
+        paths_to_test = ["/rest/user/login"]
+        logger.info("Auth probe: Juice Shop/OWASP détecté — restriction à /rest/user/login")
+    else:
+        paths_to_test = _LOGIN_PATHS
+
     try:
         async with httpx.AsyncClient(
             timeout=timeout, verify=False, follow_redirects=True,
             headers={"User-Agent": _UA},
         ) as client:
-            for path in _LOGIN_PATHS:
+            for i, path in enumerate(paths_to_test):
+                # Pause 1s entre chaque tentative (sauf la première) pour ne pas
+                # saturer la cible — critique sur apps Node.js/PHP à faible RAM.
+                if i > 0:
+                    await asyncio.sleep(1)
                 url = f"{base_url.rstrip('/')}{path}"
                 try:
                     resp = await client.get(url)
@@ -346,7 +378,7 @@ async def _perform_form_login(
     username:    str,
     password:    str,
     form_fields: Dict[str, str],
-    timeout:     float = 15.0,
+    timeout:     float = 20.0,
 ) -> Dict[str, str]:
     """
     Effectue un login par formulaire HTML et retourne les cookies de session.
@@ -640,14 +672,68 @@ async def _try_default_credentials(base: str, auth_info: Dict[str, Any], timeout
     return None
 
 
-async def _auto_authenticate(base: str, auth_info: Dict[str, Any], timeout: float) -> Optional[AuthContext]:
+async def _auto_authenticate(
+    base:          str,
+    auth_info:     Dict[str, Any],
+    timeout:       float = 20.0,
+    is_juice_shop: bool  = False,
+) -> Optional[AuthContext]:
     """
-    Authentification 100% automatique, sans credential fourni :
-      1. Enregistrement d'un compte aléatoire + login (couvre SPA/JSON)
-      2. Fallback credentials par défaut
+    Authentification 100% automatique, sans credential fourni.
+    Si is_juice_shop=True : restreint à /api/register + /rest/user/login
+    pour éviter de spammer ~20 chemins qui saturent le heap Node.js.
     """
     identity = _generate_random_identity()
 
+    if is_juice_shop:
+        logger.info("Auto-auth: Juice Shop — restriction à /api/Users + /rest/user/login")
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout, verify=False, follow_redirects=True,
+                headers={"User-Agent": _UA},
+            ) as client:
+                # 1. Enregistrement via /api/Users (POST /api/register → HTTP:000 sur Juice Shop)
+                url_reg = base.rstrip("/") + "/api/Users"
+                for payload in _registration_payloads(identity):
+                    try:
+                        resp = await client.post(url_reg, json=payload)
+                    except Exception:
+                        break
+                    if resp.status_code in (200, 201):
+                        logger.info("Auto-auth: compte Juice Shop enregistré")
+                        ctx = _ctx_from_login_response(resp, client, "register /api/Users")
+                        if ctx:
+                            ctx.notes = "Auto-registered Juice Shop account"
+                            ctx.login_url = url_reg
+                            return ctx
+                        break
+                    if resp.status_code in (400, 409, 422):
+                        continue
+                    break
+                # Pause entre enregistrement et login
+                await asyncio.sleep(1)
+                # 2. Login via /rest/user/login uniquement
+                url_login = base.rstrip("/") + "/rest/user/login"
+                for payload in _login_payloads(identity):
+                    try:
+                        resp = await client.post(url_login, json=payload)
+                    except Exception:
+                        break
+                    if resp.status_code in (200, 201):
+                        ctx = _ctx_from_login_response(resp, client, "login /rest/user/login")
+                        if ctx:
+                            ctx.login_url = url_login
+                            ctx.notes = "Auto-auth Juice Shop: register + /rest/user/login"
+                            return ctx
+                        break
+                    if resp.status_code in (400, 401, 422):
+                        continue
+                    break
+        except Exception as exc:
+            logger.debug("Juice Shop auto-auth error: %s", exc)
+        return None
+
+    # ── Mode générique : register aléatoire + login + credentials par défaut ──
     ctx = await _attempt_register_and_login(base, identity, timeout)
     if ctx and ctx.has_auth():
         return ctx
@@ -664,7 +750,7 @@ async def _auto_authenticate(base: str, auth_info: Dict[str, Any], timeout: floa
 async def detect_and_authenticate(
     target:      str,
     credentials: Optional[AuthCredentials] = None,
-    timeout:     float = 20.0,
+    timeout:     float = 60.0,
     auto_auth:   bool = True,
 ) -> AuthContext:
     """
@@ -773,12 +859,17 @@ async def detect_and_authenticate(
 
     # ── 4. Aucun credential → détection + auto-authentification ──────────
     logger.info("Auth: auto mode (no credentials) for %s", base)
-    auth_info = await detect_auth_type(base, timeout=min(timeout, 10.0))
+    auth_info = await detect_auth_type(base, timeout=min(timeout, 15.0))
+    is_juice_shop = auth_info.get("is_juice_shop", False)
 
     if auto_auth:
         # Tente register-aléatoire + login, puis credentials par défaut.
         # Couvre aussi les SPA/JSON où auth_info['type'] == 'none'.
-        auto_ctx = await _auto_authenticate(base, auth_info, timeout=min(timeout, 15.0))
+        auto_ctx = await _auto_authenticate(
+            base, auth_info,
+            timeout=min(timeout, 20.0),
+            is_juice_shop=is_juice_shop,
+        )
         if auto_ctx and auto_ctx.has_auth():
             auto_ctx.detected = True
             logger.info("Auto-auth success: %s", auto_ctx.notes)

@@ -116,3 +116,19 @@ export function useRetryScan(): UseMutationResult<Scan, Error, string> {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Stop scan mutation
+// ---------------------------------------------------------------------------
+
+export function useStopScan(): UseMutationResult<Scan, Error, string> {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: scansApi.stop,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: SCAN_KEYS.all });
+      queryClient.setQueryData(SCAN_KEYS.detail(data.id), data);
+    },
+  });
+}

@@ -11,9 +11,12 @@ Phases :
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 
 # ── Services à risque connus ─────────────────────────────────────────────────
@@ -38,7 +41,7 @@ RISKY_SERVICES: Dict[int, str] = {
 }
 
 # Ports that are extremely high-risk when unauthenticated
-_CRITICAL_EXPOSURE_PORTS = {23, 445, 3389, 5900, 6379, 27017, 9200}
+_CRITICAL_EXPOSURE_PORTS = {22, 23, 389, 445, 1433, 3389, 5432, 5900, 6379, 9200, 27017}
 
 _SEVERITY_SCORE: Dict[str, float] = {
     "critical":      95.0,
@@ -186,6 +189,9 @@ def correlate(
     abuse_data:   Dict[str, Any],
     ffuf_data:    Optional[Dict[str, Any]] = None,
     katana_data:  Optional[Dict[str, Any]] = None,
+    lab_challenges_data: Optional[Dict[str, Any]] = None,
+    nikto_data:   Optional[Dict[str, Any]] = None,
+    wapiti_data:  Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Fusionne et corrèle les résultats du pipeline de scan.
@@ -202,6 +208,9 @@ def correlate(
     """
     ffuf_data   = ffuf_data   or {}
     katana_data = katana_data or {}
+    lab_challenges_data = lab_challenges_data or {}
+    nikto_data  = nikto_data  or {}
+    wapiti_data = wapiti_data or {}
 
     service_map = _build_nmap_service_map(nmap_data)
     findings: List[Dict[str, Any]] = []
@@ -212,6 +221,8 @@ def correlate(
     # ── Phase A : Findings Nuclei → corrélation services Nmap ────────────────
     for idx, nf in enumerate(nuclei_data.get("findings", [])):
         cve_ids:    List[str]    = nf.get("cve_ids") or []
+        # FIX 8 — Normaliser en majuscules pour éviter CVE-2021-1234 ≠ cve-2021-1234
+        cve_ids = [c.upper() for c in cve_ids]
         cvss:       Optional[float] = nf.get("cvss_score")
         severity:   str          = nf.get("severity", "info")
         matched_at: str          = nf.get("matched_at", "")
@@ -287,13 +298,16 @@ def correlate(
         url_zap    = instances[0].get("uri", "") if instances else ""
         port_zap   = _extract_port_from_url(url_zap) or 80
 
-        # Merge with existing Nuclei finding on same port → boost confidence
+        # Merge with existing finding on same port only if type-compatible
         merged = False
         for f in findings:
-            if f.get("affected_port") == port_zap:
+            if (
+                f.get("affected_port") == port_zap
+                and f.get("type") in ("vulnerability", "web_vulnerability")
+                and f.get("severity") == severity_zap
+            ):
                 f["sources"] = list(set(f["sources"] + ["zap"]))
                 f["confidence_score"] = min(f["confidence_score"] + 0.10, 1.0)
-                # Add ZAP CWE if not already there
                 if cwe_id and str(cwe_id) not in f.get("cwe_ids", []):
                     f.setdefault("cwe_ids", []).append(str(cwe_id))
                 merged = True
@@ -379,7 +393,7 @@ def correlate(
     )
     endpoint_risk_ranking: List[Dict[str, Any]] = []
 
-    for ep in sensitive_eps[:25]:
+    for ep in sensitive_eps[:50]:
         url    = ep.get("url", "")
         status = ep.get("status", 200)
         sev    = _severity_from_endpoint(url, status)
@@ -458,7 +472,152 @@ def correlate(
             "category": "api", "risk_score": 30.0,
         })
 
+    # ── Phase G : Findings Nikto → misconfigs / server issues ───────────────
+    for idx, nk in enumerate(nikto_data.get("findings", [])):
+        url      = nk.get("url", "")
+        severity = nk.get("severity", "low")
+        title    = nk.get("title", "Nikto finding")
+        port     = _extract_port_from_url(url) or 80
+        svc_info = service_map.get(port)
+
+        # Boost confidence of an existing same-severity finding on the same port
+        merged = False
+        if severity in ("medium", "high", "critical"):
+            for f in findings:
+                if f.get("affected_port") == port and "nikto" not in f.get("sources", []):
+                    if f.get("severity") in ("medium", "high", "critical"):
+                        f["sources"] = list(set(f["sources"] + ["nikto"]))
+                        f["confidence_score"] = min(f["confidence_score"] + 0.08, 1.0)
+                        merged = True
+                        break
+
+        if not merged:
+            attack_path = _build_attack_path(port, svc_info, [], None, "web_vulnerability")
+            attack_paths.append(attack_path)
+            findings.append({
+                "id":                   f"nikto-{idx}",
+                "type":                 "web_vulnerability",
+                "title":                title,
+                "severity":             severity,
+                "sources":              ["nikto"] + (["nmap"] if svc_info else []),
+                "affected_service":     svc_info.get("service", "web") if svc_info else "web",
+                "affected_port":        port,
+                "cve_ids":              [],
+                "cwe_ids":              [],
+                "cvss_score":           None,
+                "epss_score":           None,
+                "tags":                 ["web", "nikto", "misconfig"],
+                "exploitability_score": _SEVERITY_SCORE.get(severity, 10.0),
+                "confidence_score":     0.80,
+                "attack_path":          attack_path,
+                "matched_at":           url,
+            })
+
+    # ── Phase H : Findings Wapiti → SQLi / XSS / CSRF / LFI / redirect ──────
+    for idx, wp in enumerate(wapiti_data.get("findings", [])):
+        url      = wp.get("url", "")
+        severity = wp.get("severity", "low")
+        title    = wp.get("title", "Wapiti finding")
+        category = wp.get("category", "")
+        port     = _extract_port_from_url(url) or 80
+        svc_info = service_map.get(port)
+
+        # Boost confidence of an existing same-severity finding on the same port
+        merged = False
+        if severity in ("medium", "high", "critical"):
+            for f in findings:
+                if f.get("affected_port") == port and "wapiti" not in f.get("sources", []):
+                    if f.get("severity") in ("medium", "high", "critical"):
+                        f["sources"] = list(set(f["sources"] + ["wapiti"]))
+                        f["confidence_score"] = min(f["confidence_score"] + 0.08, 1.0)
+                        merged = True
+                        break
+
+        if not merged:
+            attack_path = _build_attack_path(port, svc_info, [], None, "web_vulnerability")
+            attack_paths.append(attack_path)
+            cat_tag = category.lower().replace(" ", "_") if category else "web"
+            findings.append({
+                "id":                   f"wapiti-{idx}",
+                "type":                 "web_vulnerability",
+                "title":                title,
+                "severity":             severity,
+                "sources":              ["wapiti"] + (["nmap"] if svc_info else []),
+                "affected_service":     svc_info.get("service", "web") if svc_info else "web",
+                "affected_port":        port,
+                "cve_ids":              [],
+                "cwe_ids":              [],
+                "cvss_score":           None,
+                "epss_score":           None,
+                "tags":                 ["web", "wapiti", cat_tag],
+                "exploitability_score": _SEVERITY_SCORE.get(severity, 10.0),
+                "confidence_score":     0.82,
+                "attack_path":          attack_path,
+                "matched_at":           url,
+            })
+
     # ── Phase F : Scores agrégés ──────────────────────────────────────────────
+
+    # Lab challenge APIs (for intentionally vulnerable training targets such as
+    # OWASP Juice Shop) expose challenge metadata that is faster and more
+    # reliable than waiting for generic scanners to infer each weakness.
+    # When lab_mode=False, lab_challenges_data has skipped=True / detected=False
+    # → this block is naturally skipped; no lab findings or attack paths generated.
+    if lab_challenges_data.get("skipped"):
+        logger.info("[Correlator] Lab Challenge API skippée (lab_mode=false) — corrélation active uniquement")
+    if lab_challenges_data.get("detected"):
+        endpoint = lab_challenges_data.get("endpoint", "")
+        platform = lab_challenges_data.get("platform") or "vulnerable lab"
+        port = _extract_port_from_url(endpoint) or 80
+        for idx, challenge in enumerate(lab_challenges_data.get("challenges", [])[:40]):
+            try:
+                difficulty = int(challenge.get("difficulty") or 0)
+            except (TypeError, ValueError):
+                difficulty = 0
+            severity = (
+                "critical" if difficulty >= 6
+                else "high"   if difficulty >= 5
+                else "medium" if difficulty >= 3
+                else "low"
+            )
+            exploit = (
+                95.0 if severity == "critical"
+                else 75.0 if severity == "high"
+                else 55.0 if severity == "medium"
+                else 30.0
+            )
+            name = challenge.get("name") or f"Challenge #{idx + 1}"
+            category = challenge.get("category") or "lab"
+            challenge_id = challenge.get("id") or idx + 1
+            attack_path = _build_attack_path(
+                port, service_map.get(port), [], None, "web_vulnerability",
+                f"{platform} challenge metadata: {name}",
+            )
+            attack_paths.append(attack_path)
+
+            findings.append({
+                "id":                   f"lab-challenge-{challenge_id}",
+                "type":                 "lab_challenge",
+                "title":                f"{platform} challenge detected: {name}",
+                "severity":             severity,
+                "sources":              ["lab_challenge_api"],
+                "affected_service":     "web-lab",
+                "affected_port":        port,
+                "cve_ids":              [],
+                "cwe_ids":              [],
+                "cvss_score":           None,
+                "epss_score":           None,
+                "tags":                 ["web", "lab", str(category).lower()],
+                "exploitability_score": exploit,
+                "confidence_score":     0.95,
+                "attack_path":          attack_path,
+                "matched_at":           endpoint,
+                "lab_metadata":         challenge,
+            })
+            endpoint_risk_ranking.append({
+                "url": endpoint, "status": 200, "severity": severity,
+                "category": "lab_challenge", "risk_score": exploit,
+            })
 
     # Exploitability: weighted blend of top score + average
     exploit_scores = [f.get("exploitability_score", 0.0) for f in findings]

@@ -10,7 +10,7 @@ COPY --from=gitleaks-bin /usr/bin/gitleaks /usr/local/bin/gitleaks
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout=120 -r requirements.txt
 COPY main.py .
 
 EXPOSE 9008

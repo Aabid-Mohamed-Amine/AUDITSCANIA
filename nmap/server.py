@@ -1,14 +1,3 @@
-"""
-Nmap active scanner microservice v3.
-
-Fixes pour tcpwrapped + environnements cloud/CDN :
-  1. Service detection avancée (--version-intensity 9 + scripts NSE étendus)
-  2. Fallback HTTP probing via httpx sur ports tcpwrapped/unknown
-  3. Détection CDN/cloud (Cloudflare, AWS, Azure, Fastly, Akamai...)
-  4. Inférence de service par numéro de port quand Nmap échoue
-  5. Corrélation Nmap + httpx dans le résumé final
-  6. Pré-résolution DNS pour contourner les problèmes Docker
-"""
 from __future__ import annotations
 
 import asyncio
@@ -147,14 +136,14 @@ def _strip_to_host(target: str) -> str:
 def _resolve_target(target: str) -> str:
     host = _strip_to_host(target)
     if _is_ip(host):
-        return target
+        return host  # return bare IP — Nmap doesn't accept URLs
     try:
         ip = socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
         logger.info("DNS pre-resolve: %s → %s", host, ip)
         return ip
     except Exception as exc:
-        logger.warning("DNS pre-resolve failed for %s (%s), using original", host, exc)
-        return target
+        logger.warning("DNS pre-resolve failed for %s (%s), using hostname", host, exc)
+        return host  # return bare hostname — Nmap doesn't accept URLs with scheme/port
 
 
 # ---------------------------------------------------------------------------
@@ -576,8 +565,10 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             "-T3",
             "--version-intensity", "9",       # max service detection depth
             "--host-timeout",      "120s",
-            "--dns-servers",       "8.8.8.8,8.8.4.4",
             "--min-rate",          "200",
+            # N'override PAS --dns-servers : le DNS interne Docker (127.0.0.11)
+            # résout les noms internes ET forward les externes. 8.8.8.8 bypasse
+            # Docker DNS et rend les noms de containers non-résolvables.
             "--script",            _NSE_SCRIPTS,
             "-oX", "-",
             resolved,
@@ -612,7 +603,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     # ── 2. HTTP probing on tcpwrapped / unknown ports ────────────────────────
     if nmap_data.get("hosts"):
         try:
-            probe_timeout = min(8.0, (req.timeout - 60) / 4)
+            probe_timeout = max(15.0, min(30.0, (req.timeout - 60) / 3))
             await _enrich_tcpwrapped(nmap_data["hosts"], req.target, probe_timeout)
         except Exception as exc:
             logger.warning("HTTP probing step failed: %s", exc)

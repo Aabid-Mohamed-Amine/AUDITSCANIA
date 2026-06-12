@@ -8,12 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
+from sqlalchemy.orm import load_only
+
 from app.database import get_db
 from app.models.scan import Scan, ScanStatus
 from app.models.log import ScanLog
 from app.models.user import User
 from app.core.deps import get_current_user
-from app.schemas.scan import ScanCreate, ScanResponse, ScanListResponse, ScanDetailResponse, ScanLogEntry
+from app.schemas.scan import (
+    ScanCreate, ScanResponse, ScanListResponse, ScanDetailResponse,
+    ScanLogEntry, ScanSummary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +60,7 @@ def create_scan(
         target=payload.target,
         status=ScanStatus.pending,
         progress=0,
+        lab_mode=payload.lab_mode,
     )
     db.add(scan)
     db.commit()
@@ -64,7 +70,7 @@ def create_scan(
         from app.workers.scan_tasks import run_scan
         # Credentials passed to the worker only (never persisted in DB)
         creds = payload.credentials.model_dump() if payload.credentials else None
-        run_scan.delay(str(scan.id), credentials=creds)
+        run_scan.delay(str(scan.id), credentials=creds, lab_mode=payload.lab_mode)
         logger.info("Celery task queued for scan %s (auth=%s)", scan.id, bool(creds))
     except Exception as exc:
         logger.error("Failed to enqueue task for scan %s: %s", scan.id, exc)
@@ -90,10 +96,22 @@ def list_scans(
 ) -> ScanListResponse:
     query = db.query(Scan).filter(Scan.user_id == current_user.id)
     total: int = query.count()
-    items: List[Scan] = query.order_by(Scan.created_at.desc()).offset(skip).limit(limit).all()
+    # On ne charge QUE les colonnes légères depuis la DB (load_only) → les gros
+    # blobs JSON (nmap_data, zap_data, soc_report…) ne sont jamais transférés.
+    items: List[Scan] = (
+        query.options(load_only(
+            Scan.id, Scan.target, Scan.status, Scan.progress,
+            Scan.risk_score, Scan.current_phase, Scan.error_message,
+            Scan.created_at, Scan.updated_at,
+        ))
+        .order_by(Scan.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
     return ScanListResponse(
         total=total,
-        items=[ScanResponse.model_validate(s) for s in items],
+        items=[ScanSummary.model_validate(s) for s in items],
     )
 
 
@@ -182,6 +200,37 @@ def retry_scan(
     except Exception as exc:
         logger.error("Failed to enqueue retry task for scan %s: %s", scan.id, exc)
 
+    return ScanResponse.model_validate(scan)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/scans/{scan_id}/stop
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{scan_id}/stop",
+    response_model=ScanResponse,
+    summary="Stop a running or pending scan",
+)
+def stop_scan(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ScanResponse:
+    scan = _get_user_scan(scan_id, current_user, db)
+
+    if scan.status not in (ScanStatus.running, ScanStatus.pending):
+        raise HTTPException(status_code=409, detail="Only running or pending scans can be stopped")
+
+    scan.status = ScanStatus.failed
+    scan.error_message = "Scan stopped by user"
+    scan.current_phase = None
+    scan.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(scan)
+
+    logger.info("Scan %s stopped by user %s", scan.id, current_user.id)
     return ScanResponse.model_validate(scan)
 
 

@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     SQLMAP_URL:    str = "http://sqlmap:9007"
     GITLEAKS_URL:  str = "http://gitleaks:9008"
     KATANA_URL:    str = "http://katana:9009"
+    NIKTO_URL:     str = "http://nikto:9010"
+    WAPITI_URL:    str = "http://wapiti:9011"
 
     # ---- False Positive Engine ----
     FP_IGNORE_LOW_CONFIDENCE: bool = True

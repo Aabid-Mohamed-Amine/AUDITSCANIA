@@ -4,46 +4,46 @@
 
 @layer base {
   :root {
-    /* ── Base surfaces ── */
-    --background:        218 56% 4%;   /* #050c18  deep navy */
-    --foreground:        210 38% 90%;  /* #d6e4f0  cool white */
+    /* ── Linear / Vercel dark theme ── */
+    --background:         0 0% 4%;       /* #09090b  zinc-950 */
+    --foreground:         0 0% 98%;      /* #fafafa  zinc-50  */
 
-    --card:              218 50% 7%;   /* #0a1525  card surface */
-    --card-foreground:   210 38% 90%;
+    --card:               0 0% 7%;       /* #111111  */
+    --card-foreground:    0 0% 98%;
 
-    --popover:           218 50% 7%;
-    --popover-foreground: 210 38% 90%;
+    --popover:            0 0% 7%;
+    --popover-foreground: 0 0% 98%;
 
-    /* ── Brand blue (Tenable-style) ── */
-    --primary:           213 95% 57%;  /* #1a80ff  bright blue */
-    --primary-foreground: 218 56% 4%;
+    /* ── Indigo accent (Linear signature) ── */
+    --primary:            239 84% 67%;   /* #6366f1  indigo-500 */
+    --primary-foreground: 0 0% 100%;
 
-    /* ── Muted / secondary ── */
-    --secondary:         218 40% 12%;
-    --secondary-foreground: 210 38% 90%;
+    /* ── Muted ── */
+    --secondary:          240 4% 16%;    /* #27272a  zinc-800 */
+    --secondary-foreground: 0 0% 98%;
 
-    --muted:             218 40% 12%;
-    --muted-foreground:  215 22% 46%;  /* #5d7a99  blue-gray */
+    --muted:              240 4% 16%;
+    --muted-foreground:   240 5% 65%;    /* #a1a1aa  zinc-400 */
 
-    --accent:            218 40% 12%;
-    --accent-foreground: 210 38% 90%;
+    --accent:             240 4% 16%;
+    --accent-foreground:  0 0% 98%;
 
     /* ── Destructive ── */
-    --destructive:       0 72% 51%;
-    --destructive-foreground: 210 38% 90%;
+    --destructive:        0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
 
     /* ── Structural ── */
-    --border:            217 40% 13%;  /* #101e30  border */
-    --input:             218 40% 12%;
-    --ring:              213 95% 57%;
-    --radius:            0.375rem;
+    --border:             240 4% 16%;    /* #27272a  zinc-800 */
+    --input:              240 4% 16%;
+    --ring:               239 84% 67%;
+    --radius:             0.375rem;
   }
 }
 
 @layer base {
   * { @apply border-border; }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-zinc-950 text-zinc-100;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
       "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -53,16 +53,148 @@
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track  { background: hsl(var(--background)); }
-::-webkit-scrollbar-thumb  { background: hsl(217 40% 18%); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(213 60% 35%); }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #3f3f46; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #52525b; }
 
-/* ── Severity badge utilities ── */
-.sev-critical { @apply bg-red-950/60    text-red-400    border border-red-800/60; }
-.sev-high     { @apply bg-orange-950/60 text-orange-400 border border-orange-800/60; }
-.sev-medium   { @apply bg-amber-950/60  text-amber-400  border border-amber-800/60; }
-.sev-low      { @apply bg-blue-950/60   text-blue-400   border border-blue-800/60; }
-.sev-info     { @apply bg-slate-800/60  text-slate-400  border border-slate-700/60; }
+/* ── Severity badges (dark) ── */
+.sev-critical { @apply bg-red-950/50    text-red-400    border border-red-900/50; }
+.sev-high     { @apply bg-orange-950/50 text-orange-400 border border-orange-900/50; }
+.sev-medium   { @apply bg-amber-950/50  text-amber-400  border border-amber-900/50; }
+.sev-low      { @apply bg-indigo-950/50 text-indigo-400 border border-indigo-900/50; }
+.sev-info     { @apply bg-zinc-800      text-zinc-400   border border-zinc-700; }
 
-/* ── Monospace for technical data ── */
-.mono { font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace; }
+/* ── Mono for technical data ── */
+.mono { font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace; }
+
+/* ── Focus ring ── */
+*:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ────────────────────────────────────────────
+   Animations
+──────────────────────────────────────────── */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-down {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes cmd-enter {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+@keyframes scan-sweep {
+  0%      { transform: scaleX(0); transform-origin: left; }
+  50%     { transform: scaleX(1); transform-origin: left; }
+  50.001% { transform: scaleX(1); transform-origin: right; }
+  100%    { transform: scaleX(0); transform-origin: right; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+@keyframes live-ring {
+  0%   { box-shadow: 0 0 0 0   rgba(99,102,241,0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(99,102,241,0); }
+  100% { box-shadow: 0 0 0 0   rgba(99,102,241,0); }
+}
+
+@keyframes counter-pop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* ── Utility classes ── */
+.fade-in     { animation: fade-in     0.18s ease-out both; }
+.fade-in-up  { animation: fade-in-up  0.24s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.fade-in-down { animation: fade-in-down 0.2s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.slide-in-right { animation: slide-in-right 0.2s ease-out both; }
+.scan-sweep  { animation: scan-sweep  2s  cubic-bezier(0.4,0,0.2,1) infinite; }
+.live-ring   { animation: live-ring   2s  ease-out infinite; }
+.counter-pop { animation: counter-pop 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+
+/* ── Stagger children (fade-in-up with delay per nth-child) ── */
+.stagger > * {
+  animation: fade-in-up 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 45ms; }
+.stagger > *:nth-child(3) { animation-delay: 90ms; }
+.stagger > *:nth-child(4) { animation-delay: 135ms; }
+.stagger > *:nth-child(5) { animation-delay: 180ms; }
+.stagger > *:nth-child(6) { animation-delay: 225ms; }
+.stagger > *:nth-child(7) { animation-delay: 270ms; }
+.stagger > *:nth-child(8) { animation-delay: 315ms; }
+
+/* ── Progress bar ── */
+.prog-fill { transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* ── Card hover lift ── */
+.card-hover {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+.card-hover:hover {
+  transform: translateY(-1px);
+  border-color: rgba(99, 102, 241, 0.25) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(99,102,241,0.1);
+}
+
+/* ── Glow button (indigo) ── */
+.btn-glow {
+  transition: box-shadow 160ms ease, transform 80ms ease;
+}
+.btn-glow:hover:not(:disabled) {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+.btn-glow:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ── Input focus glow ── */
+.input-glow:focus {
+  border-color: rgba(99, 102, 241, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
+}
+
+/* ── Skeleton (dark) ── */
+.skeleton {
+  background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+  background-size: 200% auto;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .fade-in, .fade-in-up, .fade-in-down, .slide-in-right { animation: none; opacity: 1; transform: none; }
+  .stagger > *  { animation: none; opacity: 1; transform: none; }
+  .scan-sweep   { animation: none; }
+  .skeleton     { animation: none; background: #27272a; }
+  .live-ring    { animation: none; }
+  .prog-fill    { transition: none; }
+  .card-hover   { transition: none; }
+  .card-hover:hover { transform: none; }
+  .animate-pulse { animation: none; }
+}

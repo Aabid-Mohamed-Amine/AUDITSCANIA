@@ -45,6 +45,8 @@ export interface Scan {
   // Auth detection (Phase 1.5)
   auth_config: Record<string, unknown> | null;
   error_message: string | null;
+  // Detection mode
+  lab_mode: boolean;
   logs?: ScanLog[];
 }
 
@@ -66,6 +68,7 @@ export interface AuthCredentials {
 export interface CreateScanPayload {
   target: string;
   credentials?: AuthCredentials;
+  lab_mode?: boolean;
 }
 
 export interface User {
@@ -286,6 +289,11 @@ export const scansApi = {
 
   retry: async (id: string): Promise<Scan> => {
     const response = await apiClient.post<Scan>(`/scans/${id}/retry`);
+    return response.data;
+  },
+
+  stop: async (id: string): Promise<Scan> => {
+    const response = await apiClient.post<Scan>(`/scans/${id}/stop`);
     return response.data;
   },
 };

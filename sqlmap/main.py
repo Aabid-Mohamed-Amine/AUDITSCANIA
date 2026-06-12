@@ -37,8 +37,10 @@ _BASE_FLAGS = [
     "--no-cast",
     "--fresh-queries",
     "--disable-coloring",
-    "--timeout=10",        # per-request timeout
+    "--timeout=15",        # per-request timeout
     "--retries=1",
+    "--threads=1",
+    "--delay=2",
 ]
 
 # Extensions to skip (static assets)
@@ -178,7 +180,7 @@ def _select_technique(params: List[str], url: str) -> str:
 
     # Numeric ID params → Union-based detection often works best
     if any(re.search(r'\bid\b|_id$|^id_', p) for p in params_lower):
-        return "BEUST"   # all techniques: Boolean, Error, Union, Stacked, Time
+        return "BEU"
 
     # Search params → Boolean-based is stealthy and effective
     if any(p in params_lower for p in {"q", "search", "query", "keyword"}):
@@ -370,7 +372,7 @@ def _parse_sqlmap_output(output: str, target_url: str = "") -> List[Dict[str, An
         output, re.DOTALL,
     ):
         param, technique, title, payload = match.groups()
-        sev = "medium" if "time-based" in technique.lower() else "high"
+        sev = "high"
         findings.append({
             "parameter":       param.strip(),
             "technique":       technique.strip(),
