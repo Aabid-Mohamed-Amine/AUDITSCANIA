@@ -287,7 +287,7 @@ def _build_base_cmd(output_path: str, severity: str) -> List[str]:
     return [
         "nuclei",
         "-o",            output_path,
-        "-json",
+        "-jsonl",
         "-severity",     severity,
         "-silent",
         "-no-color",
@@ -524,10 +524,13 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
                             raw = json.loads(line)
                             slim = _slim_finding(raw)
                             tid = slim.get("template_id", "")
-                            if tid and tid in seen_template_ids:
+                            matcher = slim.get("matcher_name", "")
+                            matched_at = slim.get("matched_at", "")
+                            dedup_key = (tid, matcher, matched_at)
+                            if tid and dedup_key in seen_template_ids:
                                 continue  # déduplication par template_id
                             if tid:
-                                seen_template_ids.add(tid)
+                                seen_template_ids.add(dedup_key)
                             findings.append(slim)
                         except (json.JSONDecodeError, KeyError):
                             pass

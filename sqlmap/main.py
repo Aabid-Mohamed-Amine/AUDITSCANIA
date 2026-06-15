@@ -307,7 +307,7 @@ async def _run_sqlmap_single(
         url = _inject_dummy_values(url, params)
 
     cmd = [
-        "python", "-m", "sqlmap",
+        "sqlmap",
         "-u", url,
         "--output-dir", output_dir,
         f"--technique={technique}",
@@ -332,12 +332,17 @@ async def _run_sqlmap_single(
         if data:
             cmd += ["--data", data]
         cmd += ["--method=POST"]
-        # Don't use --forms for POST (we already know the data)
+        # --risk=3: needed for OR-based payloads (auth bypass); kept out of _BASE_FLAGS
+        #   so GET targets keep --risk=1 (majority, no need for this aggressiveness).
+        # --ignore-code=401,403,500: auth endpoints return 401/403 for invalid creds —
+        #   without this flag sqlmap aborts at connectivity test before probing injection;
+        #   500 included: observed during SQLite exploitation without blocking detection.
+        cmd += ["--risk=3", "--ignore-code=401,403,500"]
     else:
         if target.get("source") in ("primary",) and not params:
             cmd += ["--forms", "--crawl=1"]   # base target fallback
 
-    logger.info("SQLMap cmd (%s %s): %s", method, url[:60], " ".join(cmd[5:]))
+    logger.info("SQLMap cmd (%s %s): %s", method, url[:60], " ".join(cmd[3:]))
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -372,17 +377,37 @@ def _parse_sqlmap_output(output: str, target_url: str = "") -> List[Dict[str, An
         output, re.DOTALL,
     ):
         param, technique, title, payload = match.groups()
-        sev = "high"
+        param_clean = param.strip()
+        tech_clean  = technique.strip()
+        title_clean = title.strip()
+        url_lower   = target_url.lower()
+
+        # Auth bypass: login endpoint + boolean-based blind → critical (CWE-89 + CWE-287)
+        is_login         = any(k in url_lower for k in ("login", "/rest/user/"))
+        is_boolean_blind = "boolean-based blind" in tech_clean.lower()
+        if is_login and is_boolean_blind:
+            sev      = "critical"
+            cwe_ids  = ["cwe-89", "cwe-287"]
+            if "authentication bypass" not in title_clean.lower():
+                title_clean = f"SQL Injection — Authentication Bypass ({title_clean})"
+        else:
+            sev     = "high"
+            cwe_ids = ["cwe-89"]
+
         findings.append({
-            "parameter":       param.strip(),
-            "technique":       technique.strip(),
-            "title":           title.strip(),
+            "parameter":       param_clean,
+            "technique":       tech_clean,
+            "title":           title_clean,
             "payload_example": payload.strip()[:200],
             "severity":        sev,
-            "cwe_id":          "89",
+            "cwe_ids":         cwe_ids,
+            "cwe_id":          "89",    # backward compat
             "dbms":            dbms,
             "target_url":      target_url,
-            "description":     f"SQL injection via {technique.strip()} on '{param.strip()}'",
+            "description":     (
+                f"SQL injection via {tech_clean} on '{param_clean}'"
+                + (" — Authentication bypass confirmed" if is_login and is_boolean_blind else "")
+            ),
         })
 
     return findings

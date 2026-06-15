@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+import ipaddress
+
 if TYPE_CHECKING:
     from app.workers.pipeline_context import PipelineContext
 
@@ -47,7 +49,8 @@ def _f_nuclei(nuclei_data: Dict[str, Any]) -> float:
         by_sev.get("critical", 0) * 30
         + by_sev.get("high",     0) * 12
         + by_sev.get("medium",   0) * 4
-        + by_sev.get("low",      0) * 1,
+        + by_sev.get("low",      0) * 1
+        + by_sev.get("info",     0) * 0.5,
         100.0,
     )
 
@@ -214,6 +217,17 @@ def _f_wapiti(wapiti_data: Dict[str, Any]) -> float:
 # ── Scoring principal ────────────────────────────────────────────────────────
 
 
+def _target_ip_is_private(abuse_data: Dict[str, Any]) -> bool:
+    """Return True if the IP queried for AbuseIPDB/VirusTotal is private (RFC1918/loopback)."""
+    ip_str = abuse_data.get("data", {}).get("ip_address")
+    if not ip_str:
+        return False
+    try:
+        return ipaddress.ip_address(ip_str).is_private
+    except ValueError:
+        return False
+
+
 def compute_enhanced_risk_score(
     ctx: "PipelineContext",
     correlation_report: Optional[Dict[str, Any]] = None,
@@ -276,6 +290,13 @@ def compute_enhanced_risk_score(
         + f_nikto   * 0.06
         + f_wapiti  * 0.13
     )
+
+    # FIX F: renormalize weights when AbuseIPDB+VirusTotal are structurally
+    # zero (private/internal target IP) - these factors total 18% weight
+    # (0.11 + 0.07) and would otherwise cap the max score at 82/100.
+    PRIVATE_IP_TI_WEIGHT = 0.11 + 0.07
+    if _target_ip_is_private(abuse_data):
+        score = score / (1 - PRIVATE_IP_TI_WEIGHT)
 
     # ── Anti-underestimation guards — scanners (CVE / threat intel) ─────────
     # Critical CVE → score minimum HIGH (75)

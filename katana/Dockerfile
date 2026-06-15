@@ -8,7 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CHROME_PATH=/usr/bin/chromium
 ENV CHROMIUM_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu"
 
-COPY --from=katana-bin /usr/local/bin/katana /usr/local/bin/katana
+# LA CORRECTION EST ICI : on copie depuis /bin/katana et on le rend exécutable
+COPY --from=katana-bin /bin/katana /usr/local/bin/katana
+RUN chmod +x /usr/local/bin/katana
 
 WORKDIR /app
 COPY requirements.txt .

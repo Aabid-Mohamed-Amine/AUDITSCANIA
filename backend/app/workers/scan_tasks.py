@@ -8,7 +8,7 @@ Pipeline de scan professionnel — architecture SaaS cybersécurité.
   Phase 4 — Correlation    Correlator → FP Reduction → Risk Scoring        75 →  90%
   Phase 5 — SOC Dashboard  AI Analysis + SOC Report + recommandations       90 → 100%
 
-SQLMap ne tourne qu'en Phase 3 si ZAP (Phase 2) détecte des paramètres injectables.
+SQLMap ne tourne qu'en Phase 3 si ZAP (Phase 2), FFUF ou Katana détectent des paramètres injectables.
 Nuclei en Phase 2 est enrichi par les données Nmap (Phase 1).
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # ── Circuit breaker budgets par phase ────────────────────────────────────────
 _PHASE1_MAX_SECONDS = 180   # 3 min  — recon parallèle
-_PHASE2_MAX_SECONDS = 300   # 5 min  — active scan séquentiel
+_PHASE2_MAX_SECONDS = 420   # 7 min  — active scan séquentiel (Nuclei≤150s + FFUF≤90s + Dalfox≤75s + sleeps)
 _PHASE3_MAX_SECONDS = 600   # 10 min — exploitation séquentiel
 
 
@@ -156,6 +156,20 @@ async def _call_sqlmap_enriched(
         if ep.get("params"):
             extra_urls.append(ep.get("url", ""))
     extra_urls = [u for u in list(dict.fromkeys(extra_urls)) if u][:25]
+
+    # ── Auth-bypass probe — force-test /rest/user/login (Juice Shop JSON SQLi) ──
+    # Inserted at position 0 so it falls within the endpoints[:15] slice regardless
+    # of how many ZAP endpoints were discovered.
+    _base_url = target if target.startswith(("http://", "https://")) else f"http://{target}"
+    _base_url = _base_url.rstrip("/")
+    _login_probe_data = '{"email":"test@test.com","password":"wrongpass123"}'
+    endpoints.insert(0, {
+        "url":    f"{_base_url}/rest/user/login",
+        "method": "POST",
+        "params": ["email"],
+        "data":   _login_probe_data,
+    })
+    logger.info("[P3] SQLMap: probe auth-bypass ajoutée sur /rest/user/login (email, JSON)")
 
     try:
         _sqlmap_payload: Dict[str, Any] = {
@@ -1039,20 +1053,20 @@ def _build_soc_report(
         risk_level = "INFORMATIONAL"
 
     # ── Retrieve all phase results from context ───────────────────────────────
-    shodan_data    = ctx.get_step_result("shodan")       or {}
-    subfinder_data = ctx.get_step_result("subfinder")    or {}
-    nmap_data      = ctx.get_step_result("nmap")         or {}
-    vt_data        = ctx.get_step_result("virustotal")   or {}
-    abuse_data     = ctx.get_step_result("abuseipdb")    or {}
-    zap_data       = ctx.get_step_result("zap")          or {}
-    nuclei_data    = ctx.get_step_result("nuclei")       or {}
-    dalfox_data    = ctx.get_step_result("dalfox")       or {}
-    ffuf_data      = ctx.get_step_result("ffuf")         or {}
-    katana_data    = ctx.get_step_result("katana")       or {}
-    gitleaks_data  = ctx.get_step_result("gitleaks")     or {}
-    sqlmap_data    = ctx.get_step_result("sqlmap")       or {}
-    fp_data        = ctx.get_step_result("fp_reduction") or {}
-    auth_data      = ctx.get_step_result("auth_context") or {}
+    shodan_data    = ctx.get_step_result("shodan")        or {}
+    subfinder_data = ctx.get_step_result("subfinder")     or {}
+    nmap_data      = ctx.get_step_result("nmap")          or {}
+    vt_data        = ctx.get_step_result("virustotal")    or {}
+    abuse_data     = ctx.get_step_result("abuseipdb")     or {}
+    zap_data       = ctx.get_step_result("zap")           or {}
+    nuclei_data    = ctx.get_step_result("nuclei")        or {}
+    dalfox_data    = ctx.get_step_result("dalfox")        or {}
+    ffuf_data      = ctx.get_step_result("ffuf")          or {}
+    katana_data    = ctx.get_step_result("katana")        or {}
+    gitleaks_data  = ctx.get_step_result("gitleaks")      or {}
+    sqlmap_data    = ctx.get_step_result("sqlmap")        or {}
+    fp_data        = ctx.get_step_result("fp_reduction")  or {}
+    auth_data      = ctx.get_step_result("auth_context")  or {}
 
     open_ports   = nmap_data.get("summary", {}).get("ports", [])
     abuse_conf   = abuse_data.get("data", {}).get("abuse_confidence_score", 0)
@@ -1959,7 +1973,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         # ════════════════════════════════════════════════════════════════════
         # PHASE 3 — EXPLOITATION  (55 → 75%)
         # Step 3a (parallel): FFUF ∥ GitLeaks ∥ Katana (30s max, non-bloquant)
-        # Step 3b (conditional): SQLMap — only if ZAP/FFUF detected injectable params
+        # Step 3b (conditional): SQLMap — only if ZAP/FFUF/Katana detected injectable params
         # ════════════════════════════════════════════════════════════════════
         _update_scan(db, scan, current_phase="exploitation", progress=57)
         _publish(r, scan_id, "running", 57,
@@ -1973,7 +1987,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         async def _safe_katana() -> Dict[str, Any]:
             stub: Dict[str, Any] = {
                 "target": target, "skipped": False, "timed_out": False,
-                "api_endpoints": [], "endpoints": [], "js_files": [], "params": [],
+                "api_endpoints": [], "endpoints": [], "js_files": [], "params": [], "urls_with_params": [],
                 "total": 0, "error": None,
             }
             try:
@@ -2036,7 +2050,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             else:
                 _katana = {
                     "target": target, "skipped": True, "api_endpoints": [], "endpoints": [],
-                    "js_files": [], "params": [], "total": 0, "error": None,
+                    "js_files": [], "params": [], "urls_with_params": [], "total": 0, "error": None,
                     "reason": agent_decision["reasons"].get("katana", "skipped by agent decision"),
                 }
             # 5. Lab challenges (conditionnel : lab_mode=True uniquement)
@@ -2095,7 +2109,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             zap_result            = {**_p3_skip, "alerts": [], "by_risk": {}, "endpoints": [],
                                      "form_params": [], "abnormal_headers": [], "implicit_ports": []}
             gitleaks_result       = _p3_skip.copy()
-            katana_result         = {**_p3_skip, "api_endpoints": [], "endpoints": [], "js_files": [], "params": []}
+            katana_result         = {**_p3_skip, "api_endpoints": [], "endpoints": [], "js_files": [], "params": [], "urls_with_params": []}
             lab_challenges_result = {"detected": False, "challenges": [], "total": 0, "error": "phase3_timeout"}
             nikto_result          = _p3_skip.copy()
             wapiti_result         = _p3_skip.copy()
@@ -2143,7 +2157,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         if lab_challenges_result.get("detected"):
             _add_log(db, scan_id,
                      f"[P3] Lab challenges: {lab_challenges_result.get('total', 0)} challenge(s) "
-                     f"dÃ©tectÃ©s via {lab_challenges_result.get('platform')}",
+                     f"détectés via {lab_challenges_result.get('platform')}",
                      level="warning")
             for ch in lab_challenges_result.get("challenges", [])[:10]:
                 _add_log(db, scan_id,
@@ -2226,7 +2240,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                             "warning" if _wapiti_sev.get("high",     0) > 0 else "info"))
         ctx.save_step_result("wapiti", wapiti_result)
 
-        # ── Step 3b: SQLMap — conditionnel (params GET/POST détectés ZAP + FFUF) ─
+        # ── Step 3b: SQLMap — conditionnel (params GET/POST détectés ZAP + FFUF + Katana) ─
         from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
 
         # Endpoints ZAP avec query string (GET) ou form params (POST)
@@ -2241,10 +2255,13 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             ep.get("url", "") for ep in ffuf_result.get("endpoints", [])[:80]
             if ep.get("url") and _parse_qs(_urlparse(ep.get("url", "")).query)
         ]
+        
+        # Endpoints Katana avec paramètres (suite à la modif de main.py de Katana)
+        katana_param_eps = katana_result.get("urls_with_params", [])
 
-        # Déclenchement si ZAP OU FFUF a détecté des paramètres injectables.
+        # Déclenchement si ZAP, FFUF OU Katana a détecté des paramètres injectables.
         has_injectable_params = bool(
-            zap_form_params or zap_get_param_eps or ffuf_get_param_eps
+            zap_form_params or zap_get_param_eps or ffuf_get_param_eps or katana_param_eps
         )
 
         # ── Fallback paramétré : si aucun param détecté (SPA, app PHP sans crawler),
@@ -2297,11 +2314,11 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                      f"[P3] SQLMap: params détectés — "
                      f"ZAP: {len(zap_get_param_eps)} endpoints GET, "
                      f"{len(zap_form_params)} form params | "
-                     f"FFUF: {len(ffuf_get_param_eps)} endpoints GET. "
+                     f"FFUF/Katana: {len(ffuf_get_param_eps) + len(katana_param_eps)} endpoints avec params. "
                      f"Lancement (auth={'oui' if (_auth_h or _auth_c) else 'non'})...")
             sqlmap_result = loop.run_until_complete(
                 _call_sqlmap_enriched(target, zap_result, ffuf_result, katana_result,
-                                      timeout=90, auth_headers=_auth_h, auth_cookies=_auth_c)
+                                      timeout=300, auth_headers=_auth_h, auth_cookies=_auth_c)
             )
             if sqlmap_result.get("error"):
                 _add_log(db, scan_id, f"[P3] SQLMap error: {sqlmap_result['error']}", level="error")
@@ -2336,14 +2353,14 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             sqlmap_result = {
                 "target":     target,
                 "skipped":    True,
-                "reason":     "No injectable GET/POST params detected by ZAP or FFUF — SQLMap skipped (FP reduction)",
+                "reason":     "No injectable GET/POST params detected by ZAP, FFUF, or Katana — SQLMap skipped (FP reduction)",
                 "vulnerable": False,
                 "findings":   [],
                 "total":      0,
             }
             _add_log(db, scan_id,
                      "[P3] SQLMap: SKIPPED — aucun paramètre injectable (GET/POST) "
-                     "détecté par ZAP ni FFUF (réduction FP)",
+                     "détecté par ZAP, FFUF ni Katana (réduction FP)",
                      level="info")
 
         ctx.save_step_result("sqlmap", sqlmap_result)

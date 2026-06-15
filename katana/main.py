@@ -9,6 +9,7 @@ Fixes:
   - Headless mode via Chromium (-hl flag)
   - Python fallback crawler when Katana produces no output
   - DNS resolvers explicitly set (8.8.8.8, 1.1.1.1) for Docker networking
+  - JSON output (-j) and Form Fill (-ff) for better SPA and API discovery
 """
 from __future__ import annotations
 
@@ -180,7 +181,7 @@ async def _run_katana(
     Returns (lines, stderr_text).
     """
     cmd = [
-        "katana",
+        "/usr/local/bin/katana",
         "-u",         target,
         "-d",         str(depth),
         "-timeout",   "15",
@@ -189,6 +190,8 @@ async def _run_katana(
         "-resolvers", "8.8.8.8,1.1.1.1",  # explicit DNS — fixes Docker networking
         "-no-color",
         "-silent",
+        "-j",         # Force JSON output
+        "-ff",        # Enable form filling
         "-kf",        "all",
         "-ef",        _EXCLUDE_EXTENSIONS,
         "-H",         "User-Agent: Mozilla/5.0 (compatible; AuditScan/2.0)",
@@ -285,16 +288,17 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     )
 
     result: Dict[str, Any] = {
-        "target":        target_url,
-        "endpoints":     [],
-        "js_files":      [],
-        "api_endpoints": [],
-        "params":        [],
-        "total":         0,
-        "by_category":   {},
-        "used_fallback": False,
-        "preflight":     {},
-        "error":         None,
+        "target":           target_url,
+        "endpoints":        [],
+        "js_files":         [],
+        "api_endpoints":    [],
+        "urls_with_params": [],
+        "params":           [],
+        "total":            0,
+        "by_category":      {},
+        "used_fallback":    False,
+        "preflight":        {},
+        "error":            None,
     }
 
     # ── 1. Pre-flight: verify target is reachable ────────────────────────────
@@ -362,29 +366,37 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         categories: Dict[str, int] = {}
         js_files:      List[str] = []
         api_endpoints: List[str] = []
+        urls_with_params: List[str] = []
         all_params:    set = set()
 
         for ep in endpoints[:500]:
             cat = ep.get("category", "other")
             categories[cat] = categories.get(cat, 0) + 1
-            all_params.update(ep.get("params", []))
+            
+            # Sauvegarde des paramètres et des URLs qui en contiennent
+            ep_params = ep.get("params", [])
+            all_params.update(ep_params)
+            if ep_params and ep["url"] not in urls_with_params:
+                urls_with_params.append(ep["url"])
+
             if cat == "js":
                 js_files.append(ep["url"])
             elif cat == "api":
                 api_endpoints.append(ep["url"])
 
-        result["endpoints"]     = endpoints[:500]
-        result["js_files"]      = list(dict.fromkeys(js_files))[:50]
-        result["api_endpoints"] = list(dict.fromkeys(api_endpoints))[:100]
-        result["params"]        = sorted(all_params)[:100]
-        result["total"]         = len(endpoints)
-        result["by_category"]   = categories
+        result["endpoints"]        = endpoints[:500]
+        result["js_files"]         = list(dict.fromkeys(js_files))[:50]
+        result["api_endpoints"]    = list(dict.fromkeys(api_endpoints))[:100]
+        result["urls_with_params"] = urls_with_params[:100]
+        result["params"]           = sorted(all_params)[:100]
+        result["total"]            = len(endpoints)
+        result["by_category"]      = categories
 
     logger.info(
-        "Katana done — target=%s total=%d api=%d js=%d fallback=%s",
+        "Katana done — target=%s total=%d api=%d js=%d params_urls=%d fallback=%s",
         target_url, result["total"],
         len(result["api_endpoints"]), len(result["js_files"]),
-        result["used_fallback"],
+        len(result["urls_with_params"]), result["used_fallback"],
     )
     return result
 
