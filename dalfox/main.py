@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -39,23 +39,34 @@ class ScanRequest(BaseModel):
 
 
 async def _run_dalfox(url: str, timeout: int, deep_mode: bool, auth_headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    """Exécute dalfox en mode assessment défensif."""
+    """ExÃƒÂ©cute dalfox en mode assessment dÃƒÂ©fensif."""
     cmd = [
         "dalfox",
-        "url", url,
+        "scan", url,
         "--format", "json",
         "--silence",
-        "--timeout", str(min(timeout, 300)),
-        "--no-spinner",
+        "--timeout", "10",
+        "--scan-timeout", str(min(timeout, 300)),
+        "--no-color",
     ]
+    # dalfox v3 no longer auto-discovers query-string params from the URL --
+    # params_discovered stays 0 unless declared explicitly via -p. Extract
+    # them here so existing query params are always tested.
+    from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
+    _query_params = _parse_qs(_urlparse(url).query)
+    for _pname in _query_params:
+        cmd.extend(["-p", f"{_pname}:query"])
 
-    if not deep_mode:
-        # Mode léger : uniquement détection de réflexion, pas d'exploitation
-        cmd.extend(["--only-discovery"])
+    # NOTE: dalfox v3 changed --only-discovery semantics to mean
+    # "skip XSS scanning entirely" (v2 meant lightweight reflection-only
+    # check). Always run the real XSS scan now; deep_mode only controls
+    # --deep-scan (test all payloads even after finding XSS) below.
+    if deep_mode:
+        cmd.extend(["--deep-scan"])
 
     if auth_headers:
         for hname, hval in auth_headers.items():
-            cmd.extend(["--header", f"{hname}: {hval}"])
+            cmd.extend(["--headers", f"{hname}: {hval}"])
 
     findings: List[Dict[str, Any]] = []
     raw_output = ""
@@ -81,7 +92,7 @@ async def _run_dalfox(url: str, timeout: int, deep_mode: bool, auth_headers: Opt
                 elif isinstance(data, dict):
                     findings.append(data)
             except json.JSONDecodeError:
-                # Ligne non-JSON → on ignore (messages de statut)
+                # Ligne non-JSON Ã¢â€ â€™ on ignore (messages de statut)
                 pass
 
     except asyncio.TimeoutError:

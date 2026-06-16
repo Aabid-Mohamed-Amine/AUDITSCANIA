@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 app = FastAPI(title="Nuclei Scanner Microservice", version="2.0.0")
 
-# ── Base tags always included for any web target ──────────────────────────────
+# â”€â”€ Base tags always included for any web target â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # These cover the most common, highest-value findings regardless of tech stack
 _BASE_WEB_TAGS: List[str] = [
     "exposures",          # exposed sensitive files (.env, keys, creds, backups)
@@ -33,7 +33,7 @@ _BASE_NETWORK_TAGS: List[str] = [
     "default-logins",
 ]
 
-# ── Technology → Nuclei tags mapping ─────────────────────────────────────────
+# â”€â”€ Technology â†’ Nuclei tags mapping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _TECH_TAGS: Dict[str, List[str]] = {
     # CMS
     "WordPress":    ["wordpress", "cve", "wp-plugin", "misconfiguration"],
@@ -110,7 +110,7 @@ _TECH_TAGS: Dict[str, List[str]] = {
     "Kafka":        ["kafka", "network"],
 }
 
-# ── Scan category → tags ──────────────────────────────────────────────────────
+# â”€â”€ Scan category â†’ tags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _CATEGORY_TAGS: Dict[str, List[str]] = {
     "exposures":       ["exposures", "exposure"],
     "misconfigurations":["misconfiguration", "misconfig"],
@@ -151,7 +151,7 @@ class ScanRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Tech detection (Python httpx — no binary dependency)
+# Tech detection (Python httpx â€” no binary dependency)
 # ---------------------------------------------------------------------------
 
 
@@ -248,8 +248,8 @@ def _build_tag_set(
     """
     Build final Nuclei tag list by merging:
       - caller-provided tags (from Nmap/Subfinder context)
-      - tech_stack → _TECH_TAGS mapping
-      - scan_categories → _CATEGORY_TAGS mapping
+      - tech_stack â†’ _TECH_TAGS mapping
+      - scan_categories â†’ _CATEGORY_TAGS mapping
       - base tags for web/network
     """
     tag_set: set = set()
@@ -283,7 +283,7 @@ def _build_tag_set(
 
 
 def _build_base_cmd(output_path: str, severity: str) -> List[str]:
-    """Construit les arguments communs à toutes les commandes Nuclei."""
+    """Construit les arguments communs Ã  toutes les commandes Nuclei."""
     return [
         "nuclei",
         "-o",            output_path,
@@ -400,7 +400,7 @@ async def health() -> Dict[str, str]:
 @app.post("/scan")
 async def scan(req: ScanRequest) -> Dict[str, Any]:
     logger.info(
-        "Scan started — target=%s severity=%s templates=%d tags=%s tech=%s",
+        "Scan started â€” target=%s severity=%s templates=%d tags=%s tech=%s",
         req.target, req.severity,
         len(req.templates or []),
         req.tags,
@@ -418,7 +418,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "error":           None,
     }
 
-    # —— 1. Tech detection if not provided ———————————————————————————
+    # â€”â€” 1. Tech detection if not provided â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
     tech_stack = req.tech_stack or []
     if not tech_stack and _is_web_target(req.target):
         try:
@@ -428,7 +428,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         except Exception as exc:
             logger.warning("Tech detection failed: %s", exc)
 
-    # —— 2. Build tag set ————————————————————————————————————
+    # â€”â€” 2. Build tag set â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
     tags = _build_tag_set(
         req_tags        = req.tags,
         tech_stack      = tech_stack,
@@ -438,7 +438,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     result["tags_used"] = tags
     logger.info("Final Nuclei tags (%d): %s", len(tags), tags)
 
-    # —— 3. Build targets file ——————————————————————————————————
+    # â€”â€” 3. Build targets file â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
     targets_file: Optional[str] = None
     if req.extra_targets:
         all_targets = [req.target] + [t for t in req.extra_targets if t and t != req.target]
@@ -458,7 +458,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     useful_tags = [t for t in tags if t not in _GENERIC_TAGS]
     if len(useful_tags) < 2:
         logger.info(
-            "[Nuclei] cmd2 skipped — only %d useful tags after filtering generic tags (http, javascript)",
+            "[Nuclei] cmd2 skipped â€” only %d useful tags after filtering generic tags (http, javascript)",
             len(useful_tags),
         )
         cmd2: Optional[List[str]] = None
@@ -472,7 +472,12 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         logger.info("Nuclei cmd2 (tags):      skipped (insufficient useful tags)")
 
     errors: List[str] = []
-    _CMD_TIMEOUT = 90
+    # cmd1/cmd2 run in parallel via asyncio.gather, so each can use nearly
+    # the full request budget. 90s was a hardcoded leftover that killed both
+    # commands mid-scan regardless of the timeout the pipeline requested
+    # (e.g. 600s) -- with 27 tags, nuclei needs much more than 90s just to
+    # load templates and start matching.
+    _CMD_TIMEOUT = max(90, req.timeout - 15)
 
     async def _run_cmd(cmd: List[str], label: str) -> None:
         try:
@@ -486,20 +491,20 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             if stderr_text:
                 logger.debug("Nuclei %s stderr: %s", label, stderr_text[:300])
             if proc.returncode == 2:
-                # exit 2 = target unresponsive/skipped — résultats partiels conservés
+                # exit 2 = target unresponsive/skipped â€” rÃ©sultats partiels conservÃ©s
                 logger.warning("[Nuclei] %s exited with code 2 (target unresponsive or no templates matched)", label)
             elif proc.returncode not in (0, 1):
-                errors.append(f"{label}: exit {proc.returncode} — {stderr_text[:200]}")
+                errors.append(f"{label}: exit {proc.returncode} â€” {stderr_text[:200]}")
         except asyncio.TimeoutError:
             try: proc.kill()
             except Exception: pass
-            # Résultats partiels déjà streamés dans le fichier de sortie — pas un échec total
-            logger.warning("[Nuclei] cmd timeout 90s — résultats partiels conservés (%s)", label)
+            # RÃ©sultats partiels dÃ©jÃ  streamÃ©s dans le fichier de sortie â€” pas un Ã©chec total
+            logger.warning("[Nuclei] cmd timeout 90s â€” rÃ©sultats partiels conservÃ©s (%s)", label)
         except Exception as exc:
             errors.append(f"{label}: {exc}")
             logger.exception("Nuclei %s failed for %s", label, req.target)
 
-    # Lancer les commandes (cmd2 peut être sautée)
+    # Lancer les commandes (cmd2 peut Ãªtre sautÃ©e)
     gather_tasks = [_run_cmd(cmd1, "cmd1-templates")]
     if cmd2:
         gather_tasks.append(_run_cmd(cmd2, "cmd2-tags"))
@@ -508,7 +513,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     if errors:
         result["error"] = " | ".join(errors)
 
-    # —— 5. Parse + fusion + déduplication par template_id —————————————
+    # â€”â€” 5. Parse + fusion + dÃ©duplication par template_id â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
     findings: List[Dict[str, Any]] = []
     seen_template_ids: set = set()
 
@@ -528,7 +533,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
                             matched_at = slim.get("matched_at", "")
                             dedup_key = (tid, matcher, matched_at)
                             if tid and dedup_key in seen_template_ids:
-                                continue  # déduplication par template_id
+                                continue  # dÃ©duplication par template_id
                             if tid:
                                 seen_template_ids.add(dedup_key)
                             findings.append(slim)
@@ -558,7 +563,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     })
 
     logger.info(
-        "Scan complete — target=%s findings=%d critical=%d high=%d tags=%d",
+        "Scan complete â€” target=%s findings=%d critical=%d high=%d tags=%d",
         req.target, len(findings),
         result["by_severity"].get("critical", 0),
         result["by_severity"].get("high", 0),

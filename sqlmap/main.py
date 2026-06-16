@@ -1,14 +1,14 @@
-"""
-SQLMap — SQL injection assessment microservice v2.
+﻿"""
+SQLMap Ã¢â‚¬â€ SQL injection assessment microservice v2.
 
-Pipeline endpoint → params → SQLMap :
+Pipeline endpoint Ã¢â€ â€™ params Ã¢â€ â€™ SQLMap :
   1. Extraction automatique des params GET depuis les URLs
   2. Extraction depuis les form_params ZAP (POST)
   3. Extraction depuis les API endpoints Katana/FFUF
   4. Scoring et priorisation des cibles injectables
   5. Filtrage des endpoints non pertinents
-  6. Sélection de payload adaptée au type de paramètre
-  7. Runs parallèles sur les N meilleures cibles (budget timeout)
+  6. SÃƒÂ©lection de payload adaptÃƒÂ©e au type de paramÃƒÂ¨tre
+  7. Runs parallÃƒÂ¨les sur les N meilleures cibles (budget timeout)
 """
 from __future__ import annotations
 
@@ -29,13 +29,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 app = FastAPI(title="SQLMap Assessment Microservice", version="2.0.0")
 
-# ── Safe assessment flags (no data extraction, no destructive payloads) ──────
+# Ã¢â€â‚¬Ã¢â€â‚¬ Safe assessment flags (no data extraction, no destructive payloads) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 _BASE_FLAGS = [
     "--batch",
     "--level=2",           # level 2: more params, cookies (vs 1)
     "--risk=1",            # safest: no heavy UPDATE/INSERT payloads
     "--no-cast",
     "--fresh-queries",
+    "--flush-session",
     "--disable-coloring",
     "--timeout=15",        # per-request timeout
     "--retries=1",
@@ -122,7 +123,7 @@ def _inject_dummy_values(url: str, params: List[str]) -> str:
     """
     Add dummy test values for known param names when the URL has no query string.
     Allows SQLMap to target those params directly.
-    Example: /search + ["q"] → /search?q=test
+    Example: /search + ["q"] Ã¢â€ â€™ /search?q=test
     """
     if "?" in url:
         return url  # already has query string
@@ -150,7 +151,7 @@ def _score_target(url: str, params: List[str], method: str) -> int:
     matched = params_lower & {p.lower() for p in _HIGH_VALUE_PARAMS}
     score += len(matched) * 20
 
-    # ID-pattern in params → very likely injectable
+    # ID-pattern in params Ã¢â€ â€™ very likely injectable
     if any(re.search(r'\bid\b|_id$|^id_', p) for p in params_lower):
         score += 30
 
@@ -178,15 +179,15 @@ def _select_technique(params: List[str], url: str) -> str:
     params_lower = {p.lower() for p in params}
     url_lower    = url.lower()
 
-    # Numeric ID params → Union-based detection often works best
+    # Numeric ID params Ã¢â€ â€™ Union-based detection often works best
     if any(re.search(r'\bid\b|_id$|^id_', p) for p in params_lower):
         return "BEU"
 
-    # Search params → Boolean-based is stealthy and effective
+    # Search params Ã¢â€ â€™ Boolean-based is stealthy and effective
     if any(p in params_lower for p in {"q", "search", "query", "keyword"}):
         return "BEU"
 
-    # File/path params → error-based often reveals backend
+    # File/path params Ã¢â€ â€™ error-based often reveals backend
     if any(p in params_lower for p in {"file", "path", "dir", "include", "page"}):
         return "BE"
 
@@ -232,7 +233,7 @@ def _build_target_list(
             "technique": _select_technique(clean_params, url),
         })
 
-    # 1. Primary target — check if it has GET params
+    # 1. Primary target Ã¢â‚¬â€ check if it has GET params
     base_params = _extract_get_params(base_target)
     if base_params:
         _add(base_target, "GET", base_params, source="primary")
@@ -268,11 +269,16 @@ def _build_target_list(
         if params:
             _add(url, "GET", params, source="ffuf_katana")
         else:
-            # URL has no params — try to inject common ones if it looks like an endpoint
+            # URL has no params Ã¢â‚¬â€ try to inject common ones if it looks like an endpoint
             path = urlparse(url).path.lower()
             if any(k in path for k in ["/api/", "/search", "/filter", "/list", "/get"]):
-                # Skip — would just be guessing
+                # Skip Ã¢â‚¬â€ would just be guessing
                 pass
+
+    # POST login endpoints must always be tested first Ã¢â‚¬â€ score override
+    for t in targets:
+        if "login" in t["url"].lower() and t["method"] == "POST":
+            t["score"] = 9999
 
     targets.sort(key=lambda t: t["score"], reverse=True)
     logger.info(
@@ -313,7 +319,7 @@ async def _run_sqlmap_single(
         f"--technique={technique}",
     ] + _BASE_FLAGS
 
-    # ── Auth injection ────────────────────────────────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬ Auth injection Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if auth_headers:
         header_str = "\\n".join(f"{k}: {v}" for k, v in auth_headers.items())
         cmd += ["--headers", header_str]
@@ -334,10 +340,22 @@ async def _run_sqlmap_single(
         cmd += ["--method=POST"]
         # --risk=3: needed for OR-based payloads (auth bypass); kept out of _BASE_FLAGS
         #   so GET targets keep --risk=1 (majority, no need for this aggressiveness).
-        # --ignore-code=401,403,500: auth endpoints return 401/403 for invalid creds —
+        # --ignore-code=401,403,500: auth endpoints return 401/403 for invalid creds Ã¢â‚¬â€
         #   without this flag sqlmap aborts at connectivity test before probing injection;
         #   500 included: observed during SQLite exploitation without blocking detection.
-        cmd += ["--risk=3", "--ignore-code=401,403,500"]
+        # --delay=0: _BASE_FLAGS sets --delay=2 (stealthy GET scanning), which makes
+        #   ~250 requests take 500s+ -- far beyond the per-target budget. Auth-bypass
+        #   probes need full speed to reach OR-based boolean payloads in time.
+        # --technique=B: boolean-based blind alone found the auth-bypass SQLi in ~12s;
+        #   BEU (default) wastes budget on Error/Union techniques first.
+        # Filter conflicting defaults instead of relying on "last flag wins".
+        cmd = [c for c in cmd
+               if c not in ("--risk=1", "--delay=2", "--level=2")
+               and not c.startswith("--technique=")]
+        cmd += ["--risk=3", "--level=3", "--delay=0", "--technique=B", "--ignore-code=401,403,500"]
+        # --level=3 (overrides _BASE_FLAGS --level=2): the working auth-bypass
+        # payload uses the "OR boolean-based blind (NOT)" variant, which sqlmap
+        # only tests starting at level 3 -- level 2 silently misses it.
     else:
         if target.get("source") in ("primary",) and not params:
             cmd += ["--forms", "--crawl=1"]   # base target fallback
@@ -352,7 +370,22 @@ async def _run_sqlmap_single(
             env={**os.environ, "PYTHONPATH": ""},
         )
         stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return stdout_bytes.decode(errors="replace")
+        stdout_text = stdout_bytes.decode(errors="replace")
+        # sqlmap writes the structured "Parameter:/Type:/Title:/Payload:" block
+        # to output_dir/<hostname>/log, NOT to stdout. Read it if it exists.
+        try:
+            from urllib.parse import urlparse as _urlparse
+            _host = _urlparse(url).hostname or "target"
+            import pathlib
+            _sqlmap_default = pathlib.Path.home() / ".local" / "share" / "sqlmap" / "output" / _host / "log"
+            _log_path = str(_sqlmap_default)
+            if os.path.exists(_log_path):
+                _log_content = open(_log_path, errors="replace").read()
+                if "Parameter:" in _log_content:
+                    return _log_content + "\n" + stdout_text
+        except Exception:
+            pass
+        return stdout_text
     except asyncio.TimeoutError:
         try: proc.kill()
         except Exception: pass
@@ -366,14 +399,27 @@ async def _run_sqlmap_single(
 # ---------------------------------------------------------------------------
 
 
+def _clean_sqlmap_output(output: str) -> str:
+    """Normalize \r (carriage-return progress refresh) into \n so regexes
+    operating on single lines do not see interleaved log fragments."""
+    return output.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _parse_sqlmap_output(output: str, target_url: str = "") -> List[Dict[str, Any]]:
+    output = _clean_sqlmap_output(output)
+    # a single console line; raw output can interleave fragments of
     findings: List[Dict[str, Any]] = []
 
-    dbms_match = re.search(r"back-end DBMS[^:]*:\s*(.+)", output, re.IGNORECASE)
+    # Anchored to line start + DBMS immediately followed by ":" -- sqlmap
+    # prints several earlier "back-end DBMS could be/is 'X'" lines without a
+    # ":", and an unanchored [^:]* would run past newlines to grab the next
+    # ":" anywhere later (e.g. a timestamp), polluting this field with log text.
+    # Only the final "back-end DBMS: X" summary line has this exact format.
+    dbms_match = re.search(r"^back-end DBMS:\s*(.+)$", output, re.IGNORECASE | re.MULTILINE)
     dbms = dbms_match.group(1).strip() if dbms_match else ""
 
     for match in re.finditer(
-        r"Parameter:\s*(.+?)\s*\(.+?\)\s+Type:\s*(.+?)\s+Title:\s*(.+?)\s+Payload:\s*(.+?)(?=\n\n|\nParameter:|\Z)",
+        r"Parameter:\s*(.+?)\s*\(.+?\)\s+Type:\s*(.+?)\s+Title:\s*(.+?)\s+Payload:\s*(.+?)(?=\n\n|\nParameter:|\n---|\Z)",
         output, re.DOTALL,
     ):
         param, technique, title, payload = match.groups()
@@ -382,14 +428,14 @@ def _parse_sqlmap_output(output: str, target_url: str = "") -> List[Dict[str, An
         title_clean = title.strip()
         url_lower   = target_url.lower()
 
-        # Auth bypass: login endpoint + boolean-based blind → critical (CWE-89 + CWE-287)
+        # Auth bypass: login endpoint + boolean-based blind Ã¢â€ â€™ critical (CWE-89 + CWE-287)
         is_login         = any(k in url_lower for k in ("login", "/rest/user/"))
         is_boolean_blind = "boolean-based blind" in tech_clean.lower()
         if is_login and is_boolean_blind:
             sev      = "critical"
             cwe_ids  = ["cwe-89", "cwe-287"]
             if "authentication bypass" not in title_clean.lower():
-                title_clean = f"SQL Injection — Authentication Bypass ({title_clean})"
+                title_clean = f"SQL Injection - Authentication Bypass ({title_clean})"
         else:
             sev     = "high"
             cwe_ids = ["cwe-89"]
@@ -406,7 +452,7 @@ def _parse_sqlmap_output(output: str, target_url: str = "") -> List[Dict[str, An
             "target_url":      target_url,
             "description":     (
                 f"SQL injection via {tech_clean} on '{param_clean}'"
-                + (" — Authentication bypass confirmed" if is_login and is_boolean_blind else "")
+                + (" - Authentication bypass confirmed" if is_login and is_boolean_blind else "")
             ),
         })
 
@@ -427,7 +473,7 @@ async def health() -> Dict[str, str]:
 async def scan(req: ScanRequest) -> Dict[str, Any]:
     base_target = _normalize(req.target)
     logger.info(
-        "SQLMap scan — target=%s endpoints=%d form_params=%d extra_urls=%d",
+        "SQLMap scan Ã¢â‚¬â€ target=%s endpoints=%d form_params=%d extra_urls=%d",
         base_target, len(req.endpoints), len(req.form_params), len(req.extra_urls),
     )
 
@@ -442,7 +488,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "error":            None,
     }
 
-    # ── 1. Build prioritized target list ────────────────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬ 1. Build prioritized target list Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     all_targets = _build_target_list(
         base_target,
         req.endpoints,
@@ -452,7 +498,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
 
     # Fallback: if no targets with params, test base target with --forms
     if not all_targets:
-        logger.info("No param-bearing targets found — falling back to base target with --forms")
+        logger.info("No param-bearing targets found Ã¢â‚¬â€ falling back to base target with --forms")
         all_targets = [{
             "url":       base_target,
             "method":    "GET",
@@ -474,7 +520,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         len(targets_to_run), len(all_targets), per_target_timeout,
     )
 
-    # ── 2. Run SQLMap on each target ─────────────────────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬ 2. Run SQLMap on each target Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     all_findings: List[Dict[str, Any]] = []
     all_dbms:     List[str]            = []
 
@@ -491,22 +537,23 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
                 target, output_dir, per_target_timeout,
                 auth_headers=req.headers, auth_cookies=req.cookies,
             )
+            output = _clean_sqlmap_output(output)
             findings = _parse_sqlmap_output(output, target["url"])
             all_findings.extend(findings)
 
-            dbms_m = re.search(r"back-end DBMS[^:]*:\s*(.+)", output, re.IGNORECASE)
+            dbms_m = re.search(r"^back-end DBMS:\s*(.+)$", output, re.IGNORECASE | re.MULTILINE)
             if dbms_m:
                 all_dbms.append(dbms_m.group(1).strip())
 
             if findings:
                 logger.warning(
-                    "[VULNERABLE] %s %s — %d injection(s)",
+                    "[VULNERABLE] %s %s Ã¢â‚¬â€ %d injection(s)",
                     target["method"], target["url"][:60], len(findings),
                 )
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
 
-    # ── 3. Aggregate results ─────────────────────────────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬ 3. Aggregate results Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     # Deduplicate by (param, technique)
     seen_keys: set = set()
     deduped: List[Dict] = []
@@ -528,7 +575,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     })
 
     logger.info(
-        "SQLMap done — vulnerable=%s findings=%d targets_tested=%d",
+        "SQLMap done Ã¢â‚¬â€ vulnerable=%s findings=%d targets_tested=%d",
         result["vulnerable"], result["total"], result["targets_tested"],
     )
     return result

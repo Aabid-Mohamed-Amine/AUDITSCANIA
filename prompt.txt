@@ -1,95 +1,78 @@
-Tu travailles sur le projet AUDITSCANIA.
+Tu travailles sur AUDITSCANIA.
 
-CONTEXTE — VULNÉRABILITÉ CONFIRMÉE MANUELLEMENT :
-sqlmap -u http://juiceshop:3000/rest/user/login \
-  --data='{"email":"test@test.com","password":"wrongpass123"}' \
-  --method=POST -p email --batch --technique=B \
-  --risk=3 --level=2 --ignore-code=401
-
-→ CONFIRMÉ vulnérable :
-  Parameter: JSON email ((custom) POST)
-  Type: boolean-based blind
-  Title: OR boolean-based blind - WHERE or HAVING clause (NOT)
-  Payload: {"email":"test@test.com' OR NOT 2792=2792-- XRSi",...}
-  back-end DBMS: SQLite
-  (249 requêtes, ~9-12s)
-
-C'est le bypass d'authentification SQLi classique de Juice Shop
-(CWE-89, sévérité attendue CRITICAL ou HIGH — bypass d'auth).
+CONTEXTE — TROU ARCHITECTURAL CONFIRMÉ :
+sqlmap_data (microservice :9007) détecte correctement un SQLi
+CRITICAL (CWE-89+CWE-287, auth bypass sur /rest/user/login),
+mais correlator.py n'a JAMAIS reçu ni traité sqlmap_data — sa
+fonction correlate() n'a même pas ce paramètre dans sa signature.
+Résultat : correlated_data.by_severity ne contient jamais
+"critical" même quand un vrai SQLi critique est détecté, et le
+guard de scoring (score=max(score,75) si critical>=1) ne se
+déclenche jamais.
 
 Lis ces fichiers avant de commencer :
-- backend/app/workers/scan_tasks.py (fonction _call_sqlmap_enriched)
-- sqlmap/main.py (ScanRequest, EndpointInput, _BASE_FLAGS,
-  _run_sqlmap_single, _build_target_list, et la fonction qui
-  parse les résultats sqlmap pour remplir "vulnerable"/"findings"/"dbms")
+- backend/app/correlation_engine/correlator.py (def correlate(),
+  Phase A Nuclei comme modèle, structure complète d'un finding)
+- backend/app/workers/scan_tasks.py (l'appel à correlate(),
+  où sqlmap_result est déjà disponible avant cet appel)
 
 Résume. Attendre confirmation.
 
 ---
 
-## FIX G1 — sqlmap/main.py : --ignore-code + --risk pour les requêtes POST
+## FIX H — Intégrer sqlmap_data dans le Correlation Engine
 
-Dans _run_sqlmap_single, branche `if method == "POST":`
-(actuellement : cmd += ["--data", data]; cmd += ["--method=POST"]),
-AJOUTER après ces lignes :
-  cmd += ["--risk=3", "--ignore-code=401,403,500"]
+### H1 — correlator.py : ajouter le paramètre et la Phase SQLi
 
-Justification (commentaire à ajouter) :
-  - --risk=3 : nécessaire pour les payloads OR-based (auth bypass)
-  - --ignore-code=401,403,500 : les endpoints d'auth retournent
-    401/403 pour des credentials invalides — sans ce flag, sqlmap
-    abandonne au test de connectivité avant même de tester
-    l'injection. 500 ajouté car observé pendant l'exploitation
-    SQLite (87 occurrences) sans bloquer la détection.
+1. Ajouter `sqlmap_data: Optional[Dict[str, Any]] = None` à la
+   signature de correlate() (après wapiti_data, même pattern que
+   les autres Optional avec default None).
 
-Ne PAS modifier _BASE_FLAGS globalement (garder --risk=1 par
-défaut pour les requêtes GET, qui sont la majorité et n'ont pas
-besoin de cette agressivité).
+2. Juste après `wapiti_data = wapiti_data or {}`, ajouter :
+   `sqlmap_data = sqlmap_data or {}`
 
-Montrer avant/après. Attendre confirmation.
+3. Ajouter une nouvelle phase "Phase H : Findings SQLMap" (après
+   Phase A Nuclei, même style), qui itère sur
+   sqlmap_data.get("findings", []) et ajoute à `findings` une
+   entrée par finding SQLMap avec cette structure (suivre EXACTEMENT
+   le pattern de Phase A) :
 
----
+   findings.append({
+       "id":                   f"sqlmap-{idx}",
+       "type":                 "vulnerability",
+       "title":                sf.get("title", "SQL Injection"),
+       "severity":             sf.get("severity", "high"),
+       "sources":              ["sqlmap"],
+       "affected_service":     "",
+       "affected_port":        _extract_port_from_url(sf.get("target_url", "")),
+       "cve_ids":               [],
+       "cwe_ids":               sf.get("cwe_ids", []),
+       "cvss_score":            None,
+       "epss_score":            None,
+       "tags":                  ["sqli", "injection"],
+       "exploitability_score":  95.0,  # SQLi confirmé = hautement exploitable
+       "confidence_score":      0.95,  # confirmé activement par sqlmap, pas une heuristique
+       "attack_path":           f"SQL Injection on {sf.get('parameter','')} → {sf.get('description','')}",
+   })
 
-## FIX G2 — scan_tasks.py : ajouter la probe auth-bypass dans _call_sqlmap_enriched
-
-Après la construction de `endpoints` depuis ZAP (et avant le
-return/l'appel au microservice), ajouter une probe explicite
-pour l'endpoint de login (Juice Shop : /rest/user/login) :
-
-  _base_url = target if target.startswith(("http://","https://")) else f"http://{target}"
-  _base_url = _base_url.rstrip("/")
-  _login_probe_data = '{"email":"test@test.com","password":"wrongpass123"}'
-  endpoints.append({
-      "url":    f"{_base_url}/rest/user/login",
-      "method": "POST",
-      "params": ["email"],
-      "data":   _login_probe_data,
-  })
-
-Ajouter un log : "[P3] SQLMap: probe auth-bypass ajoutée sur
-/rest/user/login (email, JSON)".
+   Ajouter aussi un attack_path lisible à attack_paths (même
+   pattern que Phase A) : quelque chose comme
+   f"SQLi confirmed: {sf.get('target_url','')} → {sf.get('description','')}"
 
 Montrer avant/après. Attendre confirmation.
 
----
+### H2 — scan_tasks.py : passer sqlmap_result à correlate()
 
-## FIX G3 — Vérifier le parsing des résultats sqlmap (severity/CWE)
+Dans l'appel correlate(...), ajouter le paramètre :
+   sqlmap_data = sqlmap_result,
 
-Dans sqlmap/main.py, trouver la fonction qui transforme la sortie
-sqlmap (CSV/log dans --output-dir) en {"vulnerable": bool,
-"findings": [...], "dbms": str, "total": int}.
-
-Vérifier qu'un résultat "boolean-based blind" avec DBMS détecté
-produit bien un finding avec :
-  - severity: "critical" ou "high" (auth bypass = critique)
-  - cwe_ids: ["cwe-89"]
-  - title incluant "SQL Injection" + "Authentication Bypass" si
-    l'endpoint est /login ou /rest/user/login
-
-Si la sévérité par défaut est trop basse (ex: "medium"), ajouter
-une règle : si l'URL contient "login" ET technique="boolean-based
-blind" trouvée → severity="critical" (CWE-89 + CWE-287 Improper
-Authentication).
+ATTENTION : sqlmap_result n'existe que dans la branche
+`if has_injectable_params and "sqlmap" in tools_to_run:` — si
+cette branche n'a pas été exécutée (ne devrait plus arriver
+depuis FIX G mais sécuriser quand même), utiliser
+`sqlmap_result if 'sqlmap_result' in dir() else {}` ou s'assurer
+qu'une variable sqlmap_result = {} est initialisée avant la
+branche conditionnelle, pour éviter un NameError.
 
 Montrer avant/après. Attendre confirmation.
 
@@ -99,5 +82,5 @@ Contraintes :
 - Lire avant de modifier
 - Montrer avant/après pour chaque fix
 - Attendre confirmation après chaque fix
-- Ne pas casser les targets GET existants (--risk=1 conservé pour eux)
+- Ne pas casser les autres phases de corrélation
 

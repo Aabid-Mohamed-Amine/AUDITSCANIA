@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import logging
 import re
 import socket
@@ -125,8 +126,22 @@ def _parse_output(raw: str, target: str) -> List[Dict[str, Any]]:
                     findings.append(_vuln_to_finding(v, target))
         elif isinstance(data, list):
             for item in data:
-                if isinstance(item, dict) and (item.get("msg") or item.get("message")):
+                if not isinstance(item, dict):
+                    continue
+                if item.get("msg") or item.get("message"):
                     findings.append(_vuln_to_finding(item, target))
+                    continue
+                # Nikto -output writes a list with one wrapper object per host (containing
+                # vulnerabilities/findings/results), not a flat list of findings. Unwrap it.
+                wrapped_vulns = (
+                    item.get("vulnerabilities")
+                    or item.get("findings")
+                    or item.get("results")
+                    or []
+                )
+                for v in wrapped_vulns:
+                    if isinstance(v, dict):
+                        findings.append(_vuln_to_finding(v, target))
         return findings
     except (json.JSONDecodeError, ValueError):
         pass
@@ -171,11 +186,14 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
 
     _, hostname, ip, port = _resolve_target(target)
 
+    import uuid as _uuid
+    _output_path = f"/tmp/nikto_{_uuid.uuid4().hex[:10]}.json"
     cmd: List[str] = [
         "nikto",
         "-h", ip,
         "-p", str(port),
         "-Format", "json",
+        "-output", _output_path,
         "-maxtime", str(timeout),
         "-C", "all",
         "-nointeractive",
@@ -207,6 +225,21 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
 
         raw        = stdout.decode(errors="ignore").strip()
         stderr_txt = stderr.decode(errors="ignore").strip()
+
+        # -Format json without -output prints human-readable text to stdout,
+        # not JSON. The real structured JSON is only written to -output's file.
+        try:
+            if os.path.exists(_output_path):
+                _file_content = open(_output_path, errors="ignore").read().strip()
+                if _file_content:
+                    raw = _file_content
+        except Exception:
+            pass
+        finally:
+            try:
+                os.remove(_output_path)
+            except Exception:
+                pass
 
         # Nikto returns exit code 0 on success and may return non-zero on error
         if proc.returncode not in (0, 1) and not raw:

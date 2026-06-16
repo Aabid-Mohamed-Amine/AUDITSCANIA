@@ -1,4 +1,4 @@
-"""GitLeaks — secrets & credential detection microservice."""
+﻿"""GitLeaks â€” secrets & credential detection microservice."""
 from __future__ import annotations
 
 import asyncio
@@ -91,6 +91,14 @@ async def _scan_web_target(target: str, work_dir: str, timeout: int) -> List[Dic
         "/docker-compose.yml", "/docker-compose.yaml",
         "/Makefile", "/.travis.yml", "/.circleci/config.yml",
         "/credentials.json", "/secrets.json", "/keys.json",
+        # Node.js / Angular / modern SPA stack — webpack/angular sourcemaps
+        # often leak original source (incl. inline secrets/comments), and
+        # npm/yarn manifests can leak private registry tokens or scripts.
+        "/main.js.map", "/polyfills.js.map", "/runtime.js.map",
+        "/package.json", "/package-lock.json", "/yarn.lock",
+        "/.npmrc", "/.yarnrc",
+        "/angular.json", "/ngsw.json",
+        "/server/.env", "/api/.env", "/.env.development",
     ]
 
     base = target.rstrip("/")
@@ -98,7 +106,10 @@ async def _scan_web_target(target: str, work_dir: str, timeout: int) -> List[Dic
         for path in probe_paths:
             try:
                 resp = await client.get(base + path)
-                if resp.status_code == 200 and len(resp.text) < 50_000:
+                if resp.status_code == 200 and len(resp.text) < 1_000_000:
+                    # 1MB cap (was 50KB) -- sourcemaps (main.js.map etc.) routinely
+                    # exceed 50KB and were silently skipped even when exposed,
+                    # despite being a prime target for leaked dev comments/paths.
                     for match in secret_pattern.finditer(resp.text):
                         raw_val = match.group(1)
                         findings.append({
@@ -149,7 +160,7 @@ async def health() -> Dict[str, str]:
 @app.post("/scan")
 async def scan(req: ScanRequest) -> Dict[str, Any]:
     target = req.target.strip()
-    logger.info("GitLeaks scan started — target=%s", target)
+    logger.info("GitLeaks scan started â€” target=%s", target)
 
     result: Dict[str, Any] = {
         "target": target,
@@ -189,7 +200,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
-    logger.info("GitLeaks done — target=%s findings=%d", target, result["total"])
+    logger.info("GitLeaks done â€” target=%s findings=%d", target, result["total"])
     return result
 
 
