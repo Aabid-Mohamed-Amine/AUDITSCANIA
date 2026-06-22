@@ -2,23 +2,22 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  Shield, LayoutDashboard, PlusCircle, History,
-  LogOut, ChevronLeft, ChevronRight, Activity, Command,
-} from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
-const NAV = [
-  { href: "/dashboard",            icon: LayoutDashboard, label: "Overview",    exact: true },
-  { href: "/dashboard/scans/new",  icon: PlusCircle,      label: "New Scan"               },
-  { href: "/dashboard/history",    icon: History,         label: "Scan History"            },
+const NAV_MAIN = [
+  { href: "/dashboard",            icon: "dashboard",      label: "Dashboard",    exact: true },
+  { href: "/dashboard/history",    icon: "history",        label: "Scan History", exact: false },
+  { href: "/dashboard/scans/new",  icon: "rocket_launch",  label: "Launch Scan",  exact: true },
 ];
 
-interface Props {
-  onCmdK?: () => void;
-}
+const NAV_BOTTOM = [
+  { href: "/dashboard/health",  icon: "monitor_heart", label: "System Health" },
+  { href: "/dashboard/settings", icon: "settings",     label: "Settings"      },
+];
+
+interface Props { onCmdK?: () => void }
 
 export default function Sidebar({ onCmdK }: Props) {
   const pathname = usePathname();
@@ -26,120 +25,250 @@ export default function Sidebar({ onCmdK }: Props) {
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
 
-  const isActive = (href: string, exact?: boolean) =>
-    exact ? pathname === href : pathname.startsWith(href);
+  const isActive = (item: typeof NAV_MAIN[0]) => {
+    if (item.exact) return pathname === item.href;
+    return pathname.startsWith(item.href);
+  };
 
   const handleLogout = () => { logout(); router.push("/login"); };
+
+  const initials = user?.email?.slice(0, 2).toUpperCase() ?? "OP";
+  const analystLabel = user?.email?.split("@")[0] ?? "ANALYST_01";
 
   return (
     <aside
       className={cn(
-        "relative flex flex-col h-screen shrink-0 select-none",
-        "bg-zinc-950 border-r border-zinc-800/60",
-        "transition-[width] duration-200 ease-out",
-        collapsed ? "w-[56px]" : "w-[216px]"
+        "relative flex flex-col h-screen shrink-0 border-r",
+        "transition-[width] duration-200 ease-out"
       )}
+      style={{
+        width: collapsed ? 56 : 240,
+        background: "var(--sc-surface)",
+        borderColor: "var(--sc-border)",
+        fontFamily: "'Geist', sans-serif",
+      }}
     >
-      {/* ── Logo ── */}
-      <div className={cn(
-        "flex items-center gap-2.5 px-3 py-[17px] border-b border-zinc-800/60",
-        collapsed && "justify-center"
-      )}>
-        <div className="w-7 h-7 bg-indigo-600 rounded-[6px] flex items-center justify-center shrink-0">
-          <Shield className="w-3.5 h-3.5 text-white" />
-        </div>
+      {/* Logo / Brand */}
+      <div
+        className={cn("flex items-center gap-2 border-b px-3 py-4", collapsed && "justify-center")}
+        style={{ borderColor: "var(--sc-border)" }}
+      >
+        <span
+          className="material-symbols-outlined shrink-0"
+          style={{
+            fontSize: 22,
+            color: "var(--sc-brand)",
+            fontVariationSettings: "'FILL' 1, 'wght' 400",
+          }}
+        >
+          shield_lock
+        </span>
         {!collapsed && (
-          <div className="leading-none">
-            <span className="block text-[13px] font-semibold text-zinc-100 tracking-tight">AuditScan</span>
-            <span className="block text-[9px] text-zinc-600 uppercase tracking-[0.15em] mt-0.5">Security Platform</span>
+          <div className="leading-none overflow-hidden">
+            <span
+              className="block font-bold tracking-tighter truncate"
+              style={{ fontSize: 15, color: "var(--sc-on)" }}
+            >
+              CYBER-OPS
+            </span>
+            <span
+              className="block mt-0.5 uppercase font-mono tracking-widest opacity-60"
+              style={{ fontSize: 9, color: "var(--sc-outline)" }}
+            >
+              v2.4.0-STABLE
+            </span>
           </div>
         )}
       </div>
 
-      {/* ── Nav ── */}
-      <nav className="flex-1 px-2 pt-3 pb-2 space-y-0.5">
-        {NAV.map(({ href, icon: Icon, label, exact }) => {
-          const active = isActive(href, exact);
+      {/* Main nav */}
+      <nav className="flex-1 px-2 pt-3 pb-2 space-y-0.5 overflow-hidden">
+        {NAV_MAIN.map((item) => {
+          const active = isActive(item);
           return (
             <Link
-              key={href}
-              href={href}
-              title={collapsed ? label : undefined}
+              key={item.href}
+              href={item.href}
+              title={collapsed ? item.label : undefined}
               className={cn(
-                "group flex items-center gap-2.5 rounded-md text-[13px] transition-all duration-100",
-                collapsed ? "justify-center px-0 py-2.5" : "px-2.5 py-2",
-                active
-                  ? "bg-indigo-500/10 text-indigo-300"
-                  : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-200"
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200",
+                collapsed && "justify-center"
               )}
+              style={{
+                background:   active ? "var(--sc-high)" : "transparent",
+                color:        active ? "var(--sc-brand)" : "var(--sc-on-v)",
+                borderRight:  active ? `2px solid var(--sc-brand)` : "2px solid transparent",
+                fontWeight:   active ? 700 : 400,
+              }}
+              onMouseEnter={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLElement).style.background = "var(--sc-top)";
+                  (e.currentTarget as HTMLElement).style.color = "var(--sc-on)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLElement).style.background = "transparent";
+                  (e.currentTarget as HTMLElement).style.color = "var(--sc-on-v)";
+                }
+              }}
             >
-              <Icon className={cn(
-                "w-4 h-4 shrink-0 transition-transform duration-150 group-hover:scale-105",
-                active ? "text-indigo-400" : "text-zinc-600"
-              )} />
-              {!collapsed && <span className="truncate">{label}</span>}
-              {!collapsed && active && (
-                <span className="ml-auto w-1 h-1 rounded-full bg-indigo-400 shrink-0" />
+              <span
+                className="material-symbols-outlined shrink-0"
+                style={{ fontSize: 20 }}
+              >
+                {item.icon}
+              </span>
+              {!collapsed && (
+                <span style={{ fontSize: 14 }}>{item.label}</span>
               )}
             </Link>
           );
         })}
       </nav>
 
-      {/* ── Cmd+K hint ── */}
+      {/* Cmd+K search hint */}
       {!collapsed && (
         <div className="px-2 pb-2">
           <button
             onClick={onCmdK}
-            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50 transition-colors duration-100 group"
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors duration-100"
+            style={{ color: "var(--sc-outline)" }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "var(--sc-top)";
+              (e.currentTarget as HTMLElement).style.color = "var(--sc-on)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "transparent";
+              (e.currentTarget as HTMLElement).style.color = "var(--sc-outline)";
+            }}
           >
-            <Command className="w-3.5 h-3.5 shrink-0" />
-            <span className="text-[12px] flex-1 text-left">Quick search</span>
-            <kbd className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] border border-zinc-800 font-mono text-zinc-700 group-hover:border-zinc-700 transition-colors">
-              ⌘K
+            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>search</span>
+            <span style={{ fontSize: 12, flex: 1, textAlign: "left" }}>Quick search</span>
+            <kbd
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded font-mono"
+              style={{
+                fontSize: 10,
+                border: "1px solid var(--sc-border)",
+                color: "var(--sc-outline)",
+              }}
+            >
+              ^K
             </kbd>
           </button>
         </div>
       )}
 
-      {/* ── User + Status ── */}
-      <div className="border-t border-zinc-800/60 px-2 py-3 space-y-1.5">
+      {/* Bottom nav */}
+      <div
+        className="border-t px-2 pt-3 pb-2 space-y-0.5"
+        style={{ borderColor: "var(--sc-border)" }}
+      >
+        {NAV_BOTTOM.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            title={collapsed ? item.label : undefined}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200",
+              collapsed && "justify-center"
+            )}
+            style={{ color: "var(--sc-on-v)" }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "var(--sc-top)";
+              (e.currentTarget as HTMLElement).style.color = "var(--sc-on)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "transparent";
+              (e.currentTarget as HTMLElement).style.color = "var(--sc-on-v)";
+            }}
+          >
+            <span className="material-symbols-outlined shrink-0" style={{ fontSize: 20 }}>{item.icon}</span>
+            {!collapsed && <span style={{ fontSize: 14 }}>{item.label}</span>}
+          </Link>
+        ))}
+
+        {/* User info card */}
         {!collapsed && (
-          <>
-            <div className="flex items-center gap-2 px-2.5 py-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-              <span className="text-[10px] text-zinc-600 uppercase tracking-widest truncate">Operational</span>
+          <div
+            className="flex items-center gap-2.5 px-3 py-2 mt-2 rounded-lg"
+            style={{ background: "var(--sc-low)" }}
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white font-bold border"
+              style={{ fontSize: 11, background: "var(--sc-brand)", borderColor: "var(--sc-border)" }}
+            >
+              {initials}
             </div>
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-zinc-800/40">
-              <Activity className="w-3 h-3 text-zinc-600 shrink-0" />
-              <span className="text-[11px] text-zinc-500 truncate flex-1 font-mono">{user?.email}</span>
+            <div className="overflow-hidden flex-1">
+              <p
+                className="truncate font-semibold uppercase"
+                style={{ fontSize: 11, color: "var(--sc-on)" }}
+              >
+                {analystLabel}
+              </p>
+              <p
+                className="truncate uppercase"
+                style={{ fontSize: 9, color: "var(--sc-outline)" }}
+              >
+                L3 Security
+              </p>
             </div>
-          </>
+            <button
+              onClick={handleLogout}
+              title="Sign out"
+              className="transition-colors duration-100"
+              style={{ color: "var(--sc-outline)" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--sc-error)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--sc-outline)")}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>logout</span>
+            </button>
+          </div>
         )}
-        <button
-          onClick={handleLogout}
-          title={collapsed ? "Sign out" : undefined}
-          className={cn(
-            "w-full flex items-center gap-2 rounded-md text-[12px] text-zinc-600",
-            "hover:text-red-400 hover:bg-red-950/20 transition-colors py-1.5",
-            collapsed ? "justify-center px-0" : "px-2.5"
-          )}
-        >
-          <LogOut className="w-3.5 h-3.5 shrink-0" />
-          {!collapsed && "Sign out"}
-        </button>
+
+        {/* Collapsed logout */}
+        {collapsed && (
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            className="w-full flex items-center justify-center py-2 rounded-lg transition-colors duration-100"
+            style={{ color: "var(--sc-outline)" }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.color = "var(--sc-error)";
+              (e.currentTarget as HTMLElement).style.background = "var(--sc-err-bg)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.color = "var(--sc-outline)";
+              (e.currentTarget as HTMLElement).style.background = "transparent";
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>logout</span>
+          </button>
+        )}
       </div>
 
-      {/* ── Collapse toggle ── */}
+      {/* Collapse toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className={cn(
-          "absolute -right-[10px] top-[20px] w-[20px] h-[20px] rounded-full z-20",
-          "bg-zinc-900 border border-zinc-700/60 flex items-center justify-center",
-          "text-zinc-600 hover:text-indigo-400 hover:border-indigo-700/50 transition-all duration-150"
-        )}
+        className="absolute -right-[11px] top-[22px] w-[22px] h-[22px] rounded-full z-20 flex items-center justify-center transition-all duration-150"
+        style={{
+          background: "var(--sc-surface)",
+          border: "1px solid var(--sc-border)",
+          color: "var(--sc-outline)",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.borderColor = "var(--sc-brand)";
+          (e.currentTarget as HTMLElement).style.color = "var(--sc-brand)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.borderColor = "var(--sc-border)";
+          (e.currentTarget as HTMLElement).style.color = "var(--sc-outline)";
+        }}
       >
-        {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
+        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
+          {collapsed ? "chevron_right" : "chevron_left"}
+        </span>
       </button>
     </aside>
   );

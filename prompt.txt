@@ -1,86 +1,56 @@
-Tu travailles sur AUDITSCANIA.
+## Problème
 
-CONTEXTE — TROU ARCHITECTURAL CONFIRMÉ :
-sqlmap_data (microservice :9007) détecte correctement un SQLi
-CRITICAL (CWE-89+CWE-287, auth bypass sur /rest/user/login),
-mais correlator.py n'a JAMAIS reçu ni traité sqlmap_data — sa
-fonction correlate() n'a même pas ce paramètre dans sa signature.
-Résultat : correlated_data.by_severity ne contient jamais
-"critical" même quand un vrai SQLi critique est détecté, et le
-guard de scoring (score=max(score,75) si critical>=1) ne se
-déclenche jamais.
+Dans `backend/app/workers/scan_tasks.py`, SQLMap tourne (`sqlmap_ran: true`) mais ne teste aucun paramètre (`sqlmap_params: []`, `sqlmap_vulnerable: false`) alors qu'il devrait au minimum tester les probe packs du pack `express_nodejs` (dont `/rest/user/login` avec le paramètre `email`).
 
-Lis ces fichiers avant de commencer :
-- backend/app/correlation_engine/correlator.py (def correlate(),
-  Phase A Nuclei comme modèle, structure complète d'un finding)
-- backend/app/workers/scan_tasks.py (l'appel à correlate(),
-  où sqlmap_result est déjà disponible avant cet appel)
+## Diagnostic partiel déjà fait
 
-Résume. Attendre confirmation.
+Le pipeline a été refactorisé en fonctions imbriquées async (`_p3b_sqlmap`, `_p3a_*`, etc.) dans le cadre d'une parallélisation partielle. Deux problèmes ont été identifiés :
 
----
+1. **`has_injectable_params` check supprimé dans `_p3b_sqlmap`** -- ce check bloquait SQLMap même quand les probe packs étaient disponibles. Il a été supprimé mais SQLMap retourne toujours `sqlmap_params: []`.
 
-## FIX H — Intégrer sqlmap_data dans le Correlation Engine
+2. **Bloc fallback param probe** (autour de l'index 122000-124000) -- ce bloc synchrone utilise `loop.run_until_complete(_probe_param_endpoints())` pour sonder des endpoints avec paramètres sur la cible, puis injecte les résultats dans `ffuf_result["endpoints"]`. Ce bloc est conditionné par `if not has_injectable_params`. Or la ligne `has_injectable_params = True  # FIX G` est définie APRÈS ce bloc mais AVANT `def _p3b_sqlmap()` -- donc le fallback probe ne s'exécute jamais (le `if not has_injectable_params` est `False` au moment où il est évalué car `has_injectable_params` a été forcé à `True` avant).
 
-### H1 — correlator.py : ajouter le paramètre et la Phase SQLi
+3. **Probe packs** (`resolve_probes(probe_pack_ids, base_url)`) -- censés injecter des endpoints prioritaires (dont `/rest/user/login` avec paramètre `email`) dans la liste d'endpoints SQLMap. Ces probe packs sont normalement insérés dans `_call_sqlmap_enriched`, mais `sqlmap_params: []` suggère qu'ils ne sont pas pris en compte.
 
-1. Ajouter `sqlmap_data: Optional[Dict[str, Any]] = None` à la
-   signature de correlate() (après wapiti_data, même pattern que
-   les autres Optional avec default None).
+## Ce qu'il faut faire
 
-2. Juste après `wapiti_data = wapiti_data or {}`, ajouter :
-   `sqlmap_data = sqlmap_data or {}`
+### Diagnostic demandé en premier
 
-3. Ajouter une nouvelle phase "Phase H : Findings SQLMap" (après
-   Phase A Nuclei, même style), qui itère sur
-   sqlmap_data.get("findings", []) et ajoute à `findings` une
-   entrée par finding SQLMap avec cette structure (suivre EXACTEMENT
-   le pattern de Phase A) :
+Lis le code autour des sections suivantes dans `scan_tasks.py` et identifie précisément pourquoi `sqlmap_params` est vide :
 
-   findings.append({
-       "id":                   f"sqlmap-{idx}",
-       "type":                 "vulnerability",
-       "title":                sf.get("title", "SQL Injection"),
-       "severity":             sf.get("severity", "high"),
-       "sources":              ["sqlmap"],
-       "affected_service":     "",
-       "affected_port":        _extract_port_from_url(sf.get("target_url", "")),
-       "cve_ids":               [],
-       "cwe_ids":               sf.get("cwe_ids", []),
-       "cvss_score":            None,
-       "epss_score":            None,
-       "tags":                  ["sqli", "injection"],
-       "exploitability_score":  95.0,  # SQLi confirmé = hautement exploitable
-       "confidence_score":      0.95,  # confirmé activement par sqlmap, pas une heuristique
-       "attack_path":           f"SQL Injection on {sf.get('parameter','')} → {sf.get('description','')}",
-   })
+1. La fonction `_call_sqlmap_enriched` -- vérifie qu'elle reçoit bien `probe_pack_ids` et qu'elle insère les probe packs dans `endpoints` avant de construire la requête SQLMap.
+2. Le flux d'exécution depuis `_p3b_sqlmap()` → `_call_sqlmap_enriched(...)` -- vérifie que `ffuf_result`, `zap_result`, `katana_result` et `probe_pack_ids` ont des valeurs correctes au moment de l'appel (pas des dicts vides ou des exceptions).
+3. La variable `has_injectable_params` et le bloc fallback probe -- vérifie l'ordre exact d'évaluation.
 
-   Ajouter aussi un attack_path lisible à attack_paths (même
-   pattern que Phase A) : quelque chose comme
-   f"SQLi confirmed: {sf.get('target_url','')} → {sf.get('description','')}"
+### Fix demandé
 
-Montrer avant/après. Attendre confirmation.
+Une fois la cause identifiée, corrige pour que SQLMap reçoive au minimum les endpoints des probe packs (`express_nodejs` contient `/rest/user/login` avec paramètre `email`) -- ce qui suffit pour détecter le SQLi confirmé sur cette application.
 
-### H2 — scan_tasks.py : passer sqlmap_result à correlate()
+La logique souhaitée est simple :
+```
+probe_pack_ids = agent_decision.get("probe_pack_ids") or ["generic_rest_api"]
+probe_probes = resolve_probes(probe_pack_ids, base_url)
+# Ces probes doivent être insérées EN PREMIER dans endpoints avant tout le reste
+# pour que SQLMap les teste même si ZAP/FFUF n'ont trouvé aucun paramètre
+```
 
-Dans l'appel correlate(...), ajouter le paramètre :
-   sqlmap_data = sqlmap_result,
+Si le problème est que `_call_sqlmap_enriched` reçoit des résultats FFUF/ZAP vides (parce que les gather async ont retourné des exceptions ou des dicts vides), ajoute une validation défensive :
+```python
+# Si ffuf_result est vide/exception, utiliser un dict default
+if not isinstance(ffuf_result, dict) or not ffuf_result.get("endpoints"):
+    ffuf_result = {"endpoints": [], "by_severity": {}, "total": 0}
+```
 
-ATTENTION : sqlmap_result n'existe que dans la branche
-`if has_injectable_params and "sqlmap" in tools_to_run:` — si
-cette branche n'a pas été exécutée (ne devrait plus arriver
-depuis FIX G mais sécuriser quand même), utiliser
-`sqlmap_result if 'sqlmap_result' in dir() else {}` ou s'assurer
-qu'une variable sqlmap_result = {} est initialisée avant la
-branche conditionnelle, pour éviter un NameError.
+## Contraintes
 
-Montrer avant/après. Attendre confirmation.
+- `backend`, `worker`, `worker-slow` doivent être rebuild et recréés ENSEMBLE.
+- UTF-8 strict OBLIGATOIRE : guillemets ASCII droits (`"`) uniquement.
+- Valide la syntaxe Python (`python3 -m py_compile scan_tasks.py`) avant de terminer.
 
----
+## Validation attendue
 
-Contraintes :
-- Lire avant de modifier
-- Montrer avant/après pour chaque fix
-- Attendre confirmation après chaque fix
-- Ne pas casser les autres phases de corrélation
-
+Lance un scan sur `http://juiceshop:3000` et vérifie dans les logs :
+- `[ProbePacks] Selected: express_nodejs -- 5 probe(s) inserted` (log déjà présent par le passé)
+- `[SQLMap] N target(s) added from FFUF params_accepted` (si FFUF a trouvé des params)
+- `sqlmap_vulnerable: true` dans le rapport final
+- `sqlmap_params: ["JSON email"]` (ou équivalent)

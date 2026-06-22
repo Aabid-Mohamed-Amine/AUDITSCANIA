@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AEGIS Pentest - Secure Login</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-error-container": "#93000a",
+                    "outline": "#76777d",
+                    "surface-container-high": "#e2e8f8",
+                    "tertiary-container": "#341100",
+                    "secondary-container": "#316bf3",
+                    "surface-tint": "#575e70",
+                    "secondary-fixed": "#dbe1ff",
+                    "surface": "#f9f9ff",
+                    "on-surface-variant": "#45464c",
+                    "surface-dim": "#d3daea",
+                    "on-error": "#ffffff",
+                    "on-primary-fixed-variant": "#404758",
+                    "on-tertiary-container": "#d95f00",
+                    "surface-container-lowest": "#ffffff",
+                    "background": "#f9f9ff",
+                    "on-background": "#151c27",
+                    "on-secondary-fixed": "#00174b",
+                    "on-primary-fixed": "#141b2b",
+                    "on-surface": "#151c27",
+                    "secondary-fixed-dim": "#b4c5ff",
+                    "tertiary": "#000000",
+                    "outline-variant": "#c6c6cd",
+                    "surface-variant": "#dce2f3",
+                    "surface-container-highest": "#dce2f3",
+                    "on-primary": "#ffffff",
+                    "inverse-on-surface": "#ebf1ff",
+                    "on-secondary-container": "#fefcff",
+                    "on-tertiary-fixed": "#341100",
+                    "primary-container": "#141b2b",
+                    "surface-container": "#e7eefe",
+                    "tertiary-fixed": "#ffdbca",
+                    "secondary": "#0051d5",
+                    "on-primary-container": "#7d8497",
+                    "on-tertiary-fixed-variant": "#783200",
+                    "surface-container-low": "#f0f3ff",
+                    "on-tertiary": "#ffffff",
+                    "on-secondary": "#ffffff",
+                    "primary-fixed-dim": "#c0c6db",
+                    "inverse-surface": "#2a313d",
+                    "primary": "#000000",
+                    "inverse-primary": "#c0c6db",
+                    "error-container": "#ffdad6",
+                    "primary-fixed": "#dce2f7",
+                    "on-secondary-fixed-variant": "#003ea8",
+                    "tertiary-fixed-dim": "#ffb690",
+                    "surface-bright": "#f9f9ff",
+                    "error": "#ba1a1a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "sm": "8px",
+                    "gutter": "16px",
+                    "base": "4px",
+                    "container-margin": "32px",
+                    "lg": "24px",
+                    "md": "16px",
+                    "xs": "4px",
+                    "xl": "32px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Geist"],
+                    "headline-sm": ["Geist"],
+                    "body-md": ["Geist"],
+                    "headline-lg": ["Geist"],
+                    "label-sm": ["JetBrains Mono"],
+                    "headline-lg-mobile": ["Geist"],
+                    "headline-xl": ["Geist"],
+                    "label-md": ["JetBrains Mono"],
+                    "code-md": ["JetBrains Mono"],
+                    "label-caps": ["JetBrains Mono"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "headline-lg-mobile": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "headline-xl": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "label-md": ["13px", {"lineHeight": "16px", "fontWeight": "500"}],
+                    "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .vignette {
+            background: radial-gradient(circle, rgba(249, 249, 255, 0) 0%, rgba(249, 249, 255, 0.4) 100%);
+        }
+        .scan-line {
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #0051d5, transparent);
+            position: absolute;
+            top: -2px;
+            animation: scan 4s linear infinite;
+            opacity: 0.15;
+        }
+        @keyframes scan {
+            0% { top: 0%; }
+            100% { top: 100%; }
+        }
+        .glow-border:focus-within {
+            box-shadow: 0 0 12px rgba(0, 81, 213, 0.1);
+        }
+        #matrix-canvas {
+            filter: invert(1);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md overflow-hidden selection:bg-secondary-fixed selection:text-on-secondary-fixed">
+<!-- Background Layer -->
+<div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+<div class="absolute inset-0 opacity-10">
+<!-- Node/Shield Network Background Image -->
+<img alt="Cybersecurity grid nodes" class="w-full h-full object-cover grayscale brightness-125" src="https://lh3.googleusercontent.com/aida/AP1WRLsPSVTKw6umdkvonzjXLOQ54wGO0YZGyO0TVPOz8Kd3PRJSngP0vbRTHjZ4YFPuqFQUS2mAwbF2o8C3Tyg60TXlov7_gV9uKEHEssr8ph9f-QHEswnJTnvXrX42I8tgKskK3Bb3VBTCdVUNVzOdW2VhLRuJMRSrdMv6kPqHXyEpmmDrxoJfJUYpiUNIrdL0hBaxPSMy4ZjhdyfTQBIooEcdCwkFoLy32St0Z5hiWzpsOn05C6aHgGtgbxQL"/>
+</div>
+<div class="absolute inset-0 vignette"></div>
+<div class="absolute inset-0 bg-gradient-to-b from-background/20 via-transparent to-background/60"></div>
+<!-- Interactive Canvas Background -->
+<canvas class="absolute inset-0 opacity-[0.05]" id="matrix-canvas"></canvas>
+</div>
+<!-- Main Authentication Shell -->
+<main class="relative z-10 flex min-h-screen items-center justify-center p-gutter">
+<div class="w-full max-w-md">
+<!-- Brand Identity Header -->
+<div class="text-center mb-10">
+<div class="inline-flex items-center justify-center p-3 rounded-xl bg-surface-container border border-outline-variant mb-6 relative overflow-hidden group shadow-sm">
+<div class="scan-line"></div>
+<span class="material-symbols-outlined text-secondary text-4xl" data-icon="shield_lock" style="font-variation-settings: 'FILL' 1;">shield_lock</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">AEGIS Pentest</h1>
+<p class="font-code-md text-label-caps text-on-surface-variant mt-2 tracking-widest uppercase">Secure Command Access</p>
+</div>
+<!-- Login Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-8 shadow-xl relative backdrop-blur-md">
+<!-- Decorative Corner Accents -->
+<div class="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-secondary/20 rounded-tl-xl -translate-x-1 -translate-y-1"></div>
+<div class="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-secondary/20 rounded-br-xl translate-x-1 translate-y-1"></div>
+<form class="space-y-6" id="login-form">
+<!-- Email Field -->
+<div class="space-y-2 group">
+<label class="font-label-caps text-label-caps text-on-surface-variant group-focus-within:text-secondary transition-colors" for="email">
+                        AUTHENTICATION_IDENTITY
+                    </label>
+<div class="relative flex items-center glow-border rounded-lg transition-all transform group-focus-within:scale-[1.01]">
+<span class="absolute left-3 material-symbols-outlined text-outline text-[20px]" data-icon="alternate_email">alternate_email</span>
+<input class="w-full bg-surface-container-low border border-outline-variant text-on-surface py-3 pl-10 pr-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary/20 focus:border-secondary placeholder:text-outline/50 font-body-md transition-all" id="email" placeholder="operator@aegis.ops" required="" type="email"/>
+</div>
+</div>
+<!-- Password Field -->
+<div class="space-y-2 group">
+<div class="flex justify-between items-center">
+<label class="font-label-caps text-label-caps text-on-surface-variant group-focus-within:text-secondary transition-colors" for="password">
+                            ACCESS_CREDENTIAL
+                        </label>
+<a class="text-[11px] font-label-caps text-secondary hover:text-secondary-container transition-colors uppercase" href="#">
+                            Forgot password?
+                        </a>
+</div>
+<div class="relative flex items-center glow-border rounded-lg transition-all transform group-focus-within:scale-[1.01]">
+<span class="absolute left-3 material-symbols-outlined text-outline text-[20px]" data-icon="lock_open">lock_open</span>
+<input class="w-full bg-surface-container-low border border-outline-variant text-on-surface py-3 pl-10 pr-12 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary/20 focus:border-secondary placeholder:text-outline/50 font-body-md transition-all" id="password" placeholder="••••••••••••" required="" type="password"/>
+<button class="absolute right-3 text-outline hover:text-on-surface transition-colors" id="toggle-password" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<!-- Options -->
+<div class="flex items-center space-x-3">
+<div class="relative flex items-center">
+<input class="w-4 h-4 rounded-sm bg-surface-container-low border-outline-variant text-secondary focus:ring-secondary focus:ring-offset-background" id="remember" type="checkbox"/>
+</div>
+<label class="font-body-md text-body-md text-on-surface-variant cursor-pointer select-none" for="remember">
+                        Keep session persistent
+                    </label>
+</div>
+<!-- Sign In Button -->
+<button class="w-full py-4 bg-primary text-on-primary font-label-caps text-label-caps rounded-xl flex items-center justify-center space-x-2 group hover:bg-inverse-surface hover:shadow-xl transition-all active:scale-[0.98] shadow-lg shadow-primary/10" type="submit">
+<span class="material-symbols-outlined text-[20px] transition-transform group-hover:translate-x-1" data-icon="login">login</span>
+<span class="uppercase tracking-widest">Authorize Access</span>
+</button>
+</form>
+<!-- Status Feedback Area -->
+<div class="mt-6 pt-6 border-t border-outline-variant hidden" id="status-display">
+<div class="flex items-start space-x-3 text-secondary">
+<span class="material-symbols-outlined text-[18px] animate-pulse" data-icon="terminal">terminal</span>
+<div class="font-code-md text-[12px] leading-tight">
+<p class="mb-1 opacity-0 transition-opacity duration-300" id="status-line-1">Initiating handshake protocol...</p>
+<p class="opacity-0 transition-opacity duration-300" id="status-line-2">Validating RSA-4096 signature...</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Meta -->
+<div class="mt-8 text-center space-y-4">
+<p class="font-body-md text-on-surface-variant opacity-70">
+                Trusted by elite security analysts worldwide.
+            </p>
+<div class="flex justify-center space-x-6">
+<div class="flex items-center space-x-1 text-on-surface-variant/50">
+<span class="material-symbols-outlined text-[14px]" data-icon="verified_user">verified_user</span>
+<span class="font-label-caps text-[10px] uppercase">SOC2 Type II</span>
+</div>
+<div class="flex items-center space-x-1 text-on-surface-variant/50">
+<span class="material-symbols-outlined text-[14px]" data-icon="encrypted">encrypted</span>
+<span class="font-label-caps text-[10px] uppercase">AES-256 GCM</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<script>
+    // Matrix Background Effect (Adapted for Light Theme via CSS Filter)
+    const canvas = document.getElementById('matrix-canvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$@%&*";
+    const fontSize = 16;
+    const columns = canvas.width / fontSize;
+    const drops = [];
+
+    for (let x = 0; x < columns; x++) {
+        drops[x] = 1;
+    }
+
+    function drawMatrix() {
+        // Use background color for trail
+        ctx.fillStyle = "rgba(249, 249, 255, 0.1)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#0051d5";
+        ctx.font = fontSize + "px monospace";
+
+        for (let i = 0; i < drops.length; i++) {
+            const text = alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+            ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
+            if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+                drops[i] = 0;
+            }
+            drops[i]++;
+        }
+    }
+
+    setInterval(drawMatrix, 50);
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    });
+
+    // Form Submission Simulation
+    const loginForm = document.getElementById('login-form');
+    const statusDisplay = document.getElementById('status-display');
+    const s1 = document.getElementById('status-line-1');
+    const s2 = document.getElementById('status-line-2');
+
+    loginForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        statusDisplay.classList.remove('hidden');
+        
+        setTimeout(() => {
+            s1.classList.remove('opacity-0');
+            s1.classList.add('opacity-100');
+        }, 200);
+
+        setTimeout(() => {
+            s2.classList.remove('opacity-0');
+            s2.classList.add('opacity-100');
+        }, 800);
+
+        // Mock Success Redirect
+        setTimeout(() => {
+            document.body.classList.add('opacity-0', 'transition-opacity', 'duration-1000');
+            console.log("Authentication Successful. Redirecting to Dashboard...");
+        }, 2000);
+    });
+
+    // Password Visibility Toggle
+    const toggleBtn = document.getElementById('toggle-password');
+    const passInput = document.getElementById('password');
+    let visible = false;
+
+    toggleBtn.addEventListener('click', () => {
+        visible = !visible;
+        passInput.type = visible ? 'text' : 'password';
+        toggleBtn.querySelector('span').innerText = visible ? 'visibility_off' : 'visibility';
+    });
+</script>
+</body></html>

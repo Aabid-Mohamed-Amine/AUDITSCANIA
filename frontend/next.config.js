@@ -3,6 +3,9 @@ const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
   optimizeFonts: false,
+  httpAgentOptions: {
+    keepAlive: false,
+  },
   async rewrites() {
     return [
       {

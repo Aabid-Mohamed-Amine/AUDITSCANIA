@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Scan History | CYBER-OPS</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-error-container": "#93000a",
+                    "outline": "#76777d",
+                    "surface-container-high": "#e2e8f8",
+                    "tertiary-container": "#341100",
+                    "secondary-container": "#316bf3",
+                    "surface-tint": "#575e70",
+                    "secondary-fixed": "#dbe1ff",
+                    "surface": "#f9f9ff",
+                    "on-surface-variant": "#45464c",
+                    "surface-dim": "#d3daea",
+                    "on-error": "#ffffff",
+                    "on-primary-fixed-variant": "#404758",
+                    "on-tertiary-container": "#d95f00",
+                    "surface-container-lowest": "#ffffff",
+                    "background": "#f9f9ff",
+                    "on-background": "#151c27",
+                    "on-secondary-fixed": "#00174b",
+                    "on-primary-fixed": "#141b2b",
+                    "on-surface": "#151c27",
+                    "secondary-fixed-dim": "#b4c5ff",
+                    "tertiary": "#000000",
+                    "outline-variant": "#c6c6cd",
+                    "surface-variant": "#dce2f3",
+                    "surface-container-highest": "#dce2f3",
+                    "on-primary": "#ffffff",
+                    "inverse-on-surface": "#ebf1ff",
+                    "on-secondary-container": "#fefcff",
+                    "on-tertiary-fixed": "#341100",
+                    "primary-container": "#141b2b",
+                    "surface-container": "#e7eefe",
+                    "tertiary-fixed": "#ffdbca",
+                    "secondary": "#0051d5",
+                    "on-primary-container": "#7d8497",
+                    "on-tertiary-fixed-variant": "#783200",
+                    "surface-container-low": "#f0f3ff",
+                    "on-tertiary": "#ffffff",
+                    "on-secondary": "#ffffff",
+                    "primary-fixed-dim": "#c0c6db",
+                    "inverse-surface": "#2a313d",
+                    "primary": "#000000",
+                    "inverse-primary": "#c0c6db",
+                    "error-container": "#ffdad6",
+                    "primary-fixed": "#dce2f7",
+                    "on-secondary-fixed-variant": "#003ea8",
+                    "tertiary-fixed-dim": "#ffb690",
+                    "surface-bright": "#f9f9ff",
+                    "error": "#ba1a1a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "sm": "8px",
+                    "gutter": "16px",
+                    "base": "4px",
+                    "container-margin": "32px",
+                    "lg": "24px",
+                    "md": "16px",
+                    "xs": "4px",
+                    "xl": "32px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Geist"],
+                    "headline-sm": ["Geist"],
+                    "body-md": ["Geist"],
+                    "headline-lg": ["Geist"],
+                    "label-sm": ["JetBrains Mono"],
+                    "headline-lg-mobile": ["Geist"],
+                    "headline-xl": ["Geist"],
+                    "label-md": ["JetBrains Mono"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "headline-lg-mobile": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "headline-xl": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "label-md": ["13px", {"lineHeight": "16px", "fontWeight": "500"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        body {
+            background-color: #f9f9ff;
+            color: #151c27;
+            font-family: 'Geist', sans-serif;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f0f3ff;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #c6c6cd;
+            border-radius: 10px;
+        }
+        .glass-panel {
+            background: #ffffff;
+            border: 1px solid #c6c6cd;
+        }
+        .table-row-hover:hover {
+            background-color: #f0f3ff;
+        }
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .animate-fade-up {
+            animation: fadeInUp 0.6s ease-out forwards;
+        }
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+        .stagger-4 { animation-delay: 0.4s; }
+    </style>
+</head>
+<body class="overflow-hidden">
+<!-- Side Navigation -->
+<aside class="fixed h-full w-[240px] left-0 top-0 bg-surface-container border-r border-outline-variant flex flex-col py-md px-sm z-50">
+<div class="mb-8 px-4">
+<h1 class="font-headline-sm text-headline-sm font-bold tracking-tighter text-primary">CYBER-OPS</h1>
+<p class="text-[10px] font-label-sm text-outline uppercase tracking-widest opacity-70">v2.4.0-STABLE</p>
+</div>
+<nav class="flex-grow space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200 rounded-lg group" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-md text-body-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200 rounded-lg group" href="#">
+<span class="material-symbols-outlined" data-icon="security">security</span>
+<span class="font-body-md text-body-md">Scan Results</span>
+</a>
+<!-- Active State -->
+<a class="flex items-center gap-3 px-4 py-3 text-secondary font-bold bg-surface-container-high border-r-2 border-secondary rounded-l-lg" href="#">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span class="font-body-md text-body-md">Scan History</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200 rounded-lg group" href="#">
+<span class="material-symbols-outlined" data-icon="rocket_launch">rocket_launch</span>
+<span class="font-body-md text-body-md">Launch Scan</span>
+</a>
+</nav>
+<div class="mt-auto pt-4 border-t border-outline-variant space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200 rounded-lg group" href="#">
+<span class="material-symbols-outlined" data-icon="monitor_heart">monitor_heart</span>
+<span class="font-body-md text-body-md">System Health</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200 rounded-lg group" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-body-md text-body-md">Settings</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-[240px] w-[calc(100%-240px)] h-screen flex flex-col relative overflow-hidden">
+<!-- Top App Bar -->
+<header class="h-16 flex justify-between items-center px-gutter w-full bg-background border-b border-outline-variant sticky top-0 z-40">
+<div class="flex items-center gap-4">
+<span class="font-headline-lg text-headline-lg font-bold text-on-surface">Aegis Pentest</span>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 text-on-surface-variant">
+<button class="cursor-pointer active:scale-95 hover:text-primary transition-all">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="cursor-pointer active:scale-95 hover:text-primary transition-all">
+<span class="material-symbols-outlined" data-icon="wifi_tethering">wifi_tethering</span>
+</button>
+<button class="cursor-pointer active:scale-95 hover:text-primary transition-all">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+</button>
+</div>
+<div class="h-8 w-8 rounded-full bg-surface-container-highest border border-outline-variant overflow-hidden">
+<img alt="Analyst Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida/AP1WRLuG5NrYccyUH8qPiX7facbsW8EoWqu4_UvzMIg8IFDWltgByMsrjhHO2PON3u0D1u2NWawHxzkVPDoHH_FIBScrOyBQH413oJYGt1ZWX4uAXxI8khLC1O85SfGH6mi6h7dY007Alzm9_cWuUPG-Sgcu-TlwxhgSMU4FrcK-_-YH9cPO0V2w4C7eP140txdWWJDQYd99bI5rv9cE6Seb-pgOcdnqFbxX2j62LYhTE_5KCFAuL59CXaDXn2c"/>
+</div>
+</div>
+</header>
+<!-- Page Canvas -->
+<div class="flex-grow p-gutter overflow-y-auto custom-scrollbar">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+<div>
+<h2 class="font-headline-xl text-headline-xl text-on-surface">Scan History</h2>
+<p class="font-body-md text-body-md text-on-surface-variant max-w-xl">Audit trail of all executed security assessments across the enterprise infrastructure.</p>
+</div>
+<div class="flex flex-wrap gap-3">
+<div class="relative min-w-[280px]">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="search">search</span>
+<input class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface rounded-lg pl-10 pr-4 py-2 focus:ring-1 focus:ring-secondary focus:outline-none font-body-md transition-all" placeholder="Search target IP, URL or scan ID..." type="text"/>
+</div>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="calendar_today">calendar_today</span>
+<input class="bg-surface-container-lowest border border-outline-variant text-on-surface rounded-lg pl-10 pr-4 py-2 focus:ring-1 focus:ring-secondary focus:outline-none font-label-md cursor-pointer" type="text" value="Oct 01 - Oct 31, 2023"/>
+</div>
+<button class="bg-secondary text-on-secondary px-4 py-2 rounded-lg font-label-md flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="filter_list">filter_list</span>
+                    FILTER
+                </button>
+</div>
+</div>
+<!-- Main Table Grid -->
+<div class="glass-panel rounded-xl overflow-hidden shadow-sm">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant">
+<th class="px-6 py-4 font-label-md text-on-surface-variant uppercase tracking-wider">Target Entity</th>
+<th class="px-6 py-4 font-label-md text-on-surface-variant uppercase tracking-wider">Execution Date</th>
+<th class="px-6 py-4 font-label-md text-on-surface-variant uppercase tracking-wider">Duration</th>
+<th class="px-6 py-4 font-label-md text-on-surface-variant uppercase tracking-wider">Vulnerabilities</th>
+<th class="px-6 py-4 font-label-md text-on-surface-variant uppercase tracking-wider">Status</th>
+<th class="px-6 py-4 font-label-md text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/30 bg-surface-container-lowest">
+<!-- Row 1 -->
+<tr class="table-row-hover transition-colors cursor-pointer group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded bg-secondary/10 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined" data-icon="language">language</span>
+</div>
+<div>
+<div class="font-body-lg text-body-lg text-on-surface font-semibold">https://api.internal-node.sh</div>
+<div class="font-label-sm text-label-sm text-outline">SCAN-ID: 882-QX4</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="font-body-md text-body-md text-on-surface">Oct 24, 2023</div>
+<div class="text-[12px] text-outline">14:22:10 UTC</div>
+</td>
+<td class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant">42m 15s</td>
+<td class="px-6 py-4">
+<div class="flex gap-2">
+<span class="px-2 py-0.5 rounded bg-error-container text-on-error-container font-label-sm text-[10px] border border-error/20 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span> 3 CRITICAL
+                                </span>
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-sm text-[10px] border border-outline-variant">
+                                    12 MED
+                                </span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2 text-[#008a44] font-bold font-label-md text-[11px]">
+<span class="material-symbols-outlined text-[16px]" data-icon="check_circle">check_circle</span>
+                                COMPLETED
+                            </div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="p-2 hover:bg-surface-container-high rounded-full text-on-surface-variant transition-all">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="table-row-hover transition-colors cursor-pointer group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded bg-secondary/10 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined" data-icon="dns">dns</span>
+</div>
+<div>
+<div class="font-body-lg text-body-lg text-on-surface font-semibold">192.168.1.104</div>
+<div class="font-label-sm text-label-sm text-outline">SCAN-ID: 741-BK2</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="font-body-md text-body-md text-on-surface">Oct 23, 2023</div>
+<div class="text-[12px] text-outline">09:15:44 UTC</div>
+</td>
+<td class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant">1h 12m 04s</td>
+<td class="px-6 py-4">
+<div class="flex gap-2">
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-sm text-[10px] border border-outline-variant">
+                                    0 CRITICAL
+                                </span>
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-sm text-[10px] border border-outline-variant">
+                                    4 INFO
+                                </span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2 text-[#008a44] font-bold font-label-md text-[11px]">
+<span class="material-symbols-outlined text-[16px]" data-icon="check_circle">check_circle</span>
+                                COMPLETED
+                            </div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="p-2 hover:bg-surface-container-high rounded-full text-on-surface-variant transition-all">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 3 (Failed) -->
+<tr class="table-row-hover transition-colors cursor-pointer group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded bg-error-container text-error flex items-center justify-center">
+<span class="material-symbols-outlined" data-icon="cloud_off">cloud_off</span>
+</div>
+<div>
+<div class="font-body-lg text-body-lg text-on-surface font-semibold">staging.auth-service.com</div>
+<div class="font-label-sm text-label-sm text-outline">SCAN-ID: 109-LM9</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="font-body-md text-body-md text-on-surface">Oct 22, 2023</div>
+<div class="text-[12px] text-outline">18:02:11 UTC</div>
+</td>
+<td class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant">0m 44s</td>
+<td class="px-6 py-4">
+<span class="text-outline italic text-[12px]">No data captured</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2 text-[#ba1a1a] font-black font-label-md text-[11px]">
+<span class="material-symbols-outlined text-[16px]" data-icon="cancel">cancel</span>
+                                FAILED
+                            </div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="p-2 hover:bg-surface-container-high rounded-full text-on-surface-variant transition-all">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="table-row-hover transition-colors cursor-pointer group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded bg-secondary/10 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined" data-icon="router">router</span>
+</div>
+<div>
+<div class="font-body-lg text-body-lg text-on-surface font-semibold">Edge-Gateway-NYC-01</div>
+<div class="font-label-sm text-label-sm text-outline">SCAN-ID: 556-PD5</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="font-body-md text-body-md text-on-surface">Oct 20, 2023</div>
+<div class="text-[12px] text-outline">11:00:00 UTC</div>
+</td>
+<td class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant">5h 44m 29s</td>
+<td class="px-6 py-4">
+<div class="flex gap-2">
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-sm text-[10px] border border-outline-variant">
+                                    28 LOW
+                                </span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2 text-[#008a44] font-bold font-label-md text-[11px]">
+<span class="material-symbols-outlined text-[16px]" data-icon="check_circle">check_circle</span>
+                                COMPLETED
+                            </div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="p-2 hover:bg-surface-container-high rounded-full text-on-surface-variant transition-all">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+<!-- Pagination Footer -->
+<div class="bg-surface-container-low px-6 py-4 flex items-center justify-between border-t border-outline-variant">
+<span class="font-body-md text-body-md text-on-surface-variant">Showing 1-10 of 42 scans</span>
+<div class="flex items-center gap-2">
+<button class="p-2 rounded border border-outline-variant hover:bg-surface-container-high disabled:opacity-30" disabled="">
+<span class="material-symbols-outlined" data-icon="chevron_left">chevron_left</span>
+</button>
+<button class="w-8 h-8 rounded bg-secondary text-on-secondary font-label-md">1</button>
+<button class="w-8 h-8 rounded hover:bg-surface-container-high text-on-surface font-label-md">2</button>
+<button class="w-8 h-8 rounded hover:bg-surface-container-high text-on-surface font-label-md">3</button>
+<button class="p-2 rounded border border-outline-variant hover:bg-surface-container-high">
+<span class="material-symbols-outlined" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Dashboard Stats Summary -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-8">
+<div class="glass-panel p-6 rounded-xl animate-fade-up stagger-1 opacity-0 fill-mode-forwards shadow-sm">
+<p class="font-label-md text-on-surface-variant mb-2 uppercase tracking-wide">AVG SCAN TIME</p>
+<p class="text-[28px] font-bold text-secondary">54m 12s</p>
+</div>
+<div class="glass-panel p-6 rounded-xl animate-fade-up stagger-2 opacity-0 fill-mode-forwards shadow-sm">
+<p class="font-label-md text-on-surface-variant mb-2 uppercase tracking-wide">SUCCESS RATE</p>
+<p class="text-[28px] font-bold text-[#008a44]">98.2%</p>
+</div>
+<div class="glass-panel p-6 rounded-xl animate-fade-up stagger-3 opacity-0 fill-mode-forwards border-l-4 border-l-error shadow-sm">
+<p class="font-label-md text-on-surface-variant mb-2 uppercase tracking-wide">OPEN VULNERABILITIES</p>
+<p class="text-[28px] font-bold text-error">15</p>
+</div>
+<div class="glass-panel p-6 rounded-xl animate-fade-up stagger-4 opacity-0 fill-mode-forwards shadow-sm">
+<p class="font-label-md text-on-surface-variant mb-2 uppercase tracking-wide">LAST 30 DAYS</p>
+<p class="text-[28px] font-bold text-on-surface">142 Scans</p>
+</div>
+</div>
+</div>
+<!-- Terminal Overlay (Atmospheric) -->
+<div class="absolute bottom-4 left-gutter glass-panel rounded-full flex items-center px-4 py-2 gap-3 border border-secondary/20 shadow-lg pointer-events-none">
+<div class="w-2 h-2 rounded-full bg-secondary animate-pulse"></div>
+<p class="font-label-sm text-label-sm text-secondary">SYSTEM MONITORING ACTIVE</p>
+</div>
+</main>
+<!-- Floating Action Button -->
+<button class="fixed bottom-8 right-8 w-14 h-14 bg-secondary text-on-secondary rounded-full flex items-center justify-center shadow-xl hover:scale-110 active:scale-95 transition-all z-50 group">
+<span class="material-symbols-outlined text-[28px]" data-icon="add">add</span>
+<div class="absolute right-16 bg-on-surface text-surface px-3 py-1 rounded font-label-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-md">
+        NEW SCAN
+    </div>
+</button>
+<script>
+    // Search filter simulation
+    const searchInput = document.querySelector('input[type="text"]');
+    searchInput.addEventListener('input', (e) => {
+        const val = e.target.value.toLowerCase();
+        document.querySelectorAll('tbody tr').forEach(row => {
+            const text = row.innerText.toLowerCase();
+            row.style.opacity = text.includes(val) ? '1' : '0.2';
+            row.style.pointerEvents = text.includes(val) ? 'auto' : 'none';
+        });
+    });
+
+    // Row click simulation
+    document.querySelectorAll('tbody tr').forEach(row => {
+        row.addEventListener('click', () => {
+            row.classList.add('bg-secondary/5');
+            setTimeout(() => row.classList.remove('bg-secondary/5'), 200);
+        });
+    });
+</script>
+</body></html>

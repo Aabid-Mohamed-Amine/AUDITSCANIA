@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.schemas.user import (
-    UserCreate, UserResponse, TokenResponse,
+    UserCreate, UserResponse, TokenResponse, LoginResponse,
     LoginRequest, RefreshRequest, LogoutRequest,
 )
 from app.core.security import (
@@ -44,18 +44,19 @@ def register(request: Request, payload: UserCreate, db: Session = Depends(get_db
     return UserResponse.model_validate(user)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 @limiter.limit("5/minute")
-def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account disabled")
 
-    return TokenResponse(
+    return LoginResponse(
         access_token=create_access_token(subject=user.email),
         refresh_token=create_refresh_token(subject=user.email),
+        user=UserResponse.model_validate(user),
     )
 
 

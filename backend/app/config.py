@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     KATANA_URL:    str = "http://katana:9009"
     NIKTO_URL:     str = "http://nikto:9010"
     WAPITI_URL:    str = "http://wapiti:9011"
+    IDOR_URL:      str = "http://idor:9012"
 
     # ---- False Positive Engine ----
     FP_IGNORE_LOW_CONFIDENCE: bool = True

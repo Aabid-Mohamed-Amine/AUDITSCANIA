@@ -1,15 +1,15 @@
-﻿"""
-Pipeline de scan professionnel â€” architecture SaaS cybersÃ©curitÃ©.
+"""
+Pipeline de scan professionnel  --  architecture SaaS cybersecurite.
 
 5 phases nettes :
-  Phase 1 â€” Recon          Shodan âˆ¥ Subfinder âˆ¥ Nmap âˆ¥ AbuseIPDB âˆ¥ VT     0 â†’  25%
-  Phase 2 â€” Active Scan    ZAP âˆ¥ Nuclei (enrichi Nmap P1) âˆ¥ Dalfox        25 â†’  55%
-  Phase 3 â€” Exploitation   FFUF âˆ¥ Katana âˆ¥ GitLeaks + SQLMap (conditionnel) 55 â†’  75%
-  Phase 4 â€” Correlation    Correlator â†’ FP Reduction â†’ Risk Scoring        75 â†’  90%
-  Phase 5 â€” SOC Dashboard  AI Analysis + SOC Report + recommandations       90 â†’ 100%
+  Phase 1  --  Recon          Shodan || Subfinder || Nmap || AbuseIPDB || VT     0 ->  25%
+  Phase 2  --  Active Scan    ZAP || Nuclei (enrichi Nmap P1) || Dalfox        25 ->  55%
+  Phase 3  --  Exploitation   FFUF || Katana || GitLeaks + SQLMap (conditionnel) 55 ->  75%
+  Phase 4  --  Correlation    Correlator -> FP Reduction -> Risk Scoring        75 ->  90%
+  Phase 5  --  SOC Dashboard  AI Analysis + SOC Report + recommandations       90 -> 100%
 
-SQLMap ne tourne qu'en Phase 3 si ZAP (Phase 2), FFUF ou Katana dÃ©tectent des paramÃ¨tres injectables.
-Nuclei en Phase 2 est enrichi par les donnÃ©es Nmap (Phase 1).
+SQLMap ne tourne qu'en Phase 3 si ZAP (Phase 2), FFUF ou Katana detectent des parametres injectables.
+Nuclei en Phase 2 est enrichi par les donnees Nmap (Phase 1).
 """
 from __future__ import annotations
 
@@ -31,18 +31,18 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# â”€â”€ Circuit breaker budgets par phase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-_PHASE1_MAX_SECONDS = 180   # 3 min  â€” recon parallÃ¨le
-_PHASE2_MAX_SECONDS = 420   # 7 min  â€” active scan sÃ©quentiel (Nucleiâ‰¤150s + FFUFâ‰¤90s + Dalfoxâ‰¤75s + sleeps)
-_PHASE3_MAX_SECONDS = 600   # 10 min â€” exploitation sÃ©quentiel
+# a"EURa"EUR Circuit breaker budgets par phase a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
+_PHASE1_MAX_SECONDS = 180   # 3 min   --  recon parallele
+_PHASE2_MAX_SECONDS = 750   # 12.5 min -- Nuclei || FFUF || Dalfox en parallele -- budget = plus lent (Nuclei ~10min)
+_PHASE3_MAX_SECONDS = 600   # 10 min  --  Groupe A parallele ~5min + Groupe B parallele ~4min
 
 
-# â”€â”€ Appels aux microservices scanners â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR Appels aux microservices scanners a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
 
 
 async def _call_subfinder(target: str, timeout: int = 120) -> Dict[str, Any]:
     """Asset Discovery: Subfinder (subdomains) + httpx (HTTP probing)."""
-    # Subfinder needs a bare hostname/IP â€” strip scheme, port, and path.
+    # Subfinder needs a bare hostname/IP  --  strip scheme, port, and path.
     subfinder_host = re.sub(r"^https?://", "", target).split("/")[0].split(":")[0]
     default = {
         "target": target, "error": None,
@@ -100,23 +100,44 @@ async def _call_ffuf(
 
 
 async def _call_sqlmap_enriched(
-    target:       str,
-    zap_result:   Dict[str, Any],
-    ffuf_result:  Dict[str, Any],
-    katana_result: Dict[str, Any],
-    timeout:      int = 150,
-    auth_headers: Optional[Dict[str, Any]] = None,
-    auth_cookies: Optional[Dict[str, Any]] = None,
+    target:         str,
+    zap_result:     Dict[str, Any],
+    ffuf_result:    Dict[str, Any],
+    katana_result:  Dict[str, Any],
+    timeout:        int = 150,
+    auth_headers:   Optional[Dict[str, Any]] = None,
+    auth_cookies:   Optional[Dict[str, Any]] = None,
+    probe_pack_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    SQL injection assessment via SQLMap â€” enriched with params from ZAP/FFUF/Katana.
+    SQL injection assessment via SQLMap  --  enriched with params from ZAP/FFUF/Katana.
     Runs AFTER the parallel group so it has real endpoint/param data.
     """
     default = {"target": target, "error": None, "vulnerable": False, "findings": [], "total": 0}
 
-    # â”€â”€ Build endpoints list from ZAP spider results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Defensive validation -- guard against empty/exception results from async gather
+    if not isinstance(zap_result, dict):
+        zap_result = {"endpoints": [], "form_params": [], "alerts": [], "total": 0, "by_risk": {}}
+    if not isinstance(ffuf_result, dict):
+        ffuf_result = {"endpoints": [], "by_severity": {}, "total": 0}
+    if not isinstance(katana_result, dict):
+        katana_result = {"api_endpoints": [], "endpoints": [], "urls_with_params": [], "total": 0}
+
     from urllib.parse import urlparse, parse_qs
-    endpoints = []
+    from app.services.probe_packs import resolve_probes as _resolve_probes
+
+    # Probe packs FIRST -- always tested even when ZAP/FFUF/Katana find nothing
+    _base_url   = target if target.startswith(("http://", "https://")) else f"http://{target}"
+    _base_url   = _base_url.rstrip("/")
+    _pack_ids   = probe_pack_ids if probe_pack_ids else ["generic_rest_api"]
+    _pack_probes = _resolve_probes(_pack_ids, _base_url)
+    endpoints: List[Dict[str, Any]] = list(_pack_probes)
+    logger.info(
+        "[ProbePacks] Selected: %s -- %d probe(s) inserted at priority position 0",
+        ", ".join(_pack_ids), len(_pack_probes),
+    )
+
+    # Append ZAP endpoints
     for ep in zap_result.get("endpoints", [])[:40]:
         url    = ep.get("url", "")
         method = ep.get("method", "GET")
@@ -131,12 +152,12 @@ async def _call_sqlmap_enriched(
         if all_params or method.upper() == "POST":
             endpoints.append({"url": url, "method": method, "params": all_params, "data": ""})
 
-    # â”€â”€ Form params from ZAP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR Form params from ZAP a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     form_params = zap_result.get("form_params", [])[:20]
 
-    # â”€â”€ Extra URLs from FFUF (param-bearing + sensitive) + Katana â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR Extra URLs from FFUF (param-bearing + sensitive) + Katana a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     extra_urls: List[str] = []
-    # FFUF endpoints qui portent des paramÃ¨tres GET (?x=y) â†’ cibles SQLi directes
+    # FFUF endpoints qui portent des parametres GET (?x=y) -> cibles SQLi directes
     for ep in ffuf_result.get("endpoints", [])[:80]:
         u = ep.get("url", "")
         if u:
@@ -145,10 +166,49 @@ async def _call_sqlmap_enriched(
                     extra_urls.append(u)
             except Exception:
                 pass
-    # FFUF sensitive paths (admin, config, etc.)
-    extra_urls += [ep.get("url", "") for ep in
-                   (ffuf_result.get("by_severity", {}).get("critical", []) +
-                    ffuf_result.get("by_severity", {}).get("high", []))[:10]]
+    # FFUF sensitive paths (admin, config, etc.) -- widened from critical+high
+    # to also include medium (generic /api/, /rest/ paths land here, not in
+    # critical/high which are reserved for credential/secret-file patterns).
+    _ffuf_sensitive = (ffuf_result.get("by_severity", {}).get("critical", []) +
+                       ffuf_result.get("by_severity", {}).get("high", []) +
+                       ffuf_result.get("by_severity", {}).get("medium", []))[:15]
+    extra_urls += [ep.get("url", "") for ep in _ffuf_sensitive]
+    # FFUF params_accepted: param probing confirmed these endpoints actually
+    # read the parameter server-side (response size changed). This is a stronger
+    # signal than generic probes -- use the confirmed param names, not a
+    # generic list.
+    _ffuf_pa = [
+        ep for ep in ffuf_result.get("endpoints", [])[:20]
+        if ep.get("params_accepted")
+    ]
+    for _ep in _ffuf_pa:
+        _u = _ep.get("url", "")
+        if not _u:
+            continue
+        endpoints.append({
+            "url":    _u,
+            "method": "GET",
+            "params": list(_ep["params_accepted"]),
+            "data":   "",
+        })
+    logger.info(
+        "[SQLMap] %d target(s) added from FFUF params_accepted",
+        len(_ffuf_pa),
+    )
+    # Generic param probing: most of these sensitive paths are bare GET
+    # endpoints with no "?param=" in their URL, so _build_target_list silently
+    # drops them (GET without params is skipped). Re-test each as a few common
+    # parameter names so the SQLi engine actually gets a chance on them.
+    _GENERIC_TEST_PARAMS = ["id", "q", "search", "filter", "page"]
+    for _ep in _ffuf_sensitive:
+        _u = _ep.get("url", "")
+        if _u and "?" not in _u:
+            endpoints.append({
+                "url":    _u,
+                "method": "GET",
+                "params": list(_GENERIC_TEST_PARAMS),
+                "data":   "",
+            })
     # Katana API endpoints
     extra_urls += katana_result.get("api_endpoints", [])[:10]
     # Katana endpoints with GET params
@@ -157,41 +217,11 @@ async def _call_sqlmap_enriched(
             extra_urls.append(ep.get("url", ""))
     extra_urls = [u for u in list(dict.fromkeys(extra_urls)) if u][:25]
 
-    # â”€â”€ Auth-bypass probe â€” force-test /rest/user/login (Juice Shop JSON SQLi) â”€â”€
-    # Inserted at position 0 so it falls within the endpoints[:15] slice regardless
-    # of how many ZAP endpoints were discovered.
-    _base_url = target if target.startswith(("http://", "https://")) else f"http://{target}"
-    _base_url = _base_url.rstrip("/")
-    _login_probe_data = '{"email":"test@test.com","password":"wrongpass123"}'
-    endpoints.insert(0, {
-        "url":    f"{_base_url}/rest/user/login",
-        "method": "POST",
-        "params": ["email"],
-        "data":   _login_probe_data,
-    })
-    logger.info("[P3] SQLMap: probe auth-bypass ajoutÃ©e sur /rest/user/login (email, JSON)")
-    # Additional forced probes — known Juice Shop endpoints worth testing
-    # even when ZAP/FFUF/Katana report zero param-bearing endpoints (this SPA
-    # routes client-side, so the server rarely sees query strings via crawl).
-    endpoints.insert(1, {
-        "url":    f"{_base_url}/rest/products/search?q=test",
-        "method": "GET",
-        "params": ["q"],
-        "data":   "",
-    })
-    endpoints.insert(2, {
-        "url":    f"{_base_url}/api/Feedbacks",
-        "method": "POST",
-        "params": ["comment"],
-        "data":   "{\"captchaId\":0,\"captcha\":\"a\",\"rating\":1,\"comment\":\"test\"}",
-    })
-    logger.info("[P3] SQLMap: probes additionnelles ajoutees sur /rest/products/search (q) et /api/Feedbacks (comment)")
-
     try:
         _sqlmap_payload: Dict[str, Any] = {
             "target":      target,
             "timeout":     timeout,
-            "endpoints":   endpoints[:15],
+            "endpoints":   endpoints[:20],
             "form_params": form_params,
             "extra_urls":  extra_urls,
             "technique":   "BEU",
@@ -240,7 +270,7 @@ async def _call_gitleaks(target: str, timeout: int = 120) -> Dict[str, Any]:
 
 
 async def _call_katana(target: str, timeout: int = 90) -> Dict[str, Any]:
-    """JS/SPA web crawling via Katana â€” extracts hidden endpoints and API calls."""
+    """JS/SPA web crawling via Katana  --  extracts hidden endpoints and API calls."""
     default = {
         "target": target, "error": None,
         "endpoints": [], "js_files": [], "api_endpoints": [],
@@ -322,6 +352,58 @@ async def _call_wapiti(
         default["error"] = "Wapiti service HTTP request timed out"
     except Exception as exc:
         default["error"] = str(exc)
+    return default
+
+
+async def _call_idor(
+    target:       str,
+    endpoints:    Optional[List[str]] = None,
+    timeout:      int = 120,
+    auth_headers: Optional[Dict[str, Any]] = None,
+    auth_cookies: Optional[Dict[str, Any]] = None,
+    user_a_email: Optional[str] = None,
+    user_a_id:    Optional[int] = None,
+) -> Dict[str, Any]:
+    """IDOR/Broken Access Control testing via two-account cross-access probe."""
+    default = {
+        "target": target, "error": None, "findings": [], "total": 0,
+        "by_severity": {}, "skipped": False, "reason": None,
+        "user_b_email": None, "user_b_id": None, "candidates_tested": 0,
+    }
+    target_url = target if target.startswith(("http://", "https://")) else f"http://{target}"
+    payload: Dict[str, Any] = {
+        "target": target_url,
+        "timeout": timeout,
+        "endpoints": (endpoints or [])[:40],
+    }
+    if auth_headers:
+        payload["auth_headers"] = auth_headers
+    if auth_cookies:
+        payload["auth_cookies"] = auth_cookies
+    if user_a_email:
+        payload["user_a_email"] = user_a_email
+    if user_a_id:
+        payload["user_a_id"] = user_a_id
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(float(timeout + 60))) as client:
+            resp = await client.post(
+                f"{settings.IDOR_URL}/scan",
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.ConnectError:
+        default["error"] = "IDOR service unavailable (container not running?)"
+        default["skipped"] = True
+        default["reason"] = "service_unavailable"
+    except httpx.TimeoutException:
+        default["error"] = "IDOR service HTTP request timed out"
+        default["skipped"] = True
+        default["reason"] = "service_timeout"
+    except Exception as exc:
+        default["error"] = str(exc)
+        default["skipped"] = True
+        default["reason"] = "service_error"
     return default
 
 
@@ -421,7 +503,7 @@ async def _call_dalfox(
     urls:         Optional[List[str]] = None,
     auth_headers: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """XSS detection via Dalfox (dÃ©fensif, assessment uniquement)."""
+    """XSS detection via Dalfox (defensif, assessment uniquement)."""
     default = {
         "target": target, "error": None,
         "findings": [], "total": 0, "by_severity": {},
@@ -486,8 +568,8 @@ async def _call_zap(
         "by_risk": {}, "endpoints": [], "form_params": [],
         "abnormal_headers": [], "implicit_ports": [],
     }
-    # Mode web-app approfondi : AJAX spider activÃ© (indispensable pour crawler les
-    # SPA Angular/React oÃ¹ le spider HTML classique ne voit aucune page) + temps
+    # Mode web-app approfondi : AJAX spider active (indispensable pour crawler les
+    # SPA Angular/React ou le spider HTML classique ne voit aucune page) + temps
     # suffisant pour que le scan actif (XSS, SQLi, XXE) se termine.
     payload: Dict[str, Any] = {
         "target":         target,
@@ -516,8 +598,8 @@ async def _call_zap(
 
 
 async def _wait_for_target(target: str, max_retries: int = 6) -> bool:
-    """GET sur la cible (timeout 8s). Retente jusqu'Ã  max_retries fois avec 10s entre chaque.
-    Retourne True si la cible rÃ©pond, False sinon. Ne bloque jamais le pipeline."""
+    """GET sur la cible (timeout 8s). Retente jusqu'a max_retries fois avec 10s entre chaque.
+    Retourne True si la cible repond, False sinon. Ne bloque jamais le pipeline."""
     url = target if target.startswith(("http://", "https://")) else f"http://{target}"
     for attempt in range(1, max_retries + 1):
         try:
@@ -526,13 +608,13 @@ async def _wait_for_target(target: str, max_retries: int = 6) -> bool:
             ) as client:
                 resp = await client.get(url)
             if resp.status_code < 500:
-                logger.info("[HEALTH] target=%s OK â€” continue", target)
+                logger.info("[HEALTH] target=%s OK -- continue", target)
                 return True
         except Exception as exc:
             logger.warning("[HEALTH] target=%s KO (attempt %d/%d): %s", target, attempt, max_retries, exc)
         if attempt < max_retries:
             await asyncio.sleep(10)
-    logger.warning("[HEALTH] target=%s KO after %d attempts â€” continue anyway", target, max_retries)
+    logger.warning("[HEALTH] target=%s KO after %d attempts  --  continue anyway", target, max_retries)
     return False
 
 
@@ -547,7 +629,7 @@ async def _call_nuclei(
     auth_cookies:    Optional[Dict[str, Any]] = None,
     severity:        Optional[str] = None,
 ) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"target": target, "timeout": 120}
+    payload: Dict[str, Any] = {"target": target, "timeout": 600}
     if templates:
         payload["templates"] = templates
     if tags:
@@ -570,7 +652,7 @@ async def _call_nuclei(
         "templates_used": templates or [], "tags_used": tags or [],
     }
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(150.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(650.0)) as client:
             resp = await client.post(f"{settings.NUCLEI_URL}/scan", json=payload)
             resp.raise_for_status()
             return resp.json()
@@ -583,7 +665,7 @@ async def _call_nuclei(
     return default
 
 
-# â”€â”€ Helpers DB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR Helpers DB a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
 
 
 def _get_db_session():
@@ -611,7 +693,7 @@ def _update_scan(db, scan, **kwargs) -> None:
     db.refresh(scan)
 
 
-# â”€â”€ Redis publish â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR Redis publish a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
 
 
 def _publish(
@@ -632,7 +714,7 @@ def _publish(
     }))
 
 
-# â”€â”€ Helpers pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR Helpers pipeline a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
 
 
 def _extract_discovered_ips(nmap_result: Dict[str, Any], initial_target: str) -> List[str]:
@@ -649,12 +731,12 @@ def _extract_ports_from_zap(zap_result: Dict[str, Any]) -> List[int]:
     return zap_result.get("implicit_ports", [])
 
 
-# â”€â”€ Nuclei context builder v2 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR Nuclei context builder v2 a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
 # Uses ALL available sources: Nmap, Subfinder, FFUF, Katana, Nmap HTTP probes
 
-# Service name â†’ base tags
+# Service name -> base tags
 _SVC_TAGS: Dict[str, List[str]] = {
-    "http":          ["http", "exposures", "misconfiguration"],
+    "http":          ["exposure", "misconfig"],
     "https":         ["http", "ssl", "tls"],
     "ftp":           ["ftp", "network", "default-logins"],
     "ssh":           ["ssh", "network"],
@@ -682,7 +764,7 @@ _SVC_TAGS: Dict[str, List[str]] = {
     "etcd":          ["network", "etcd"],
 }
 
-# Product keyword â†’ (tags, CVE template IDs)
+# Product keyword -> (tags, CVE template IDs)
 _PRODUCT_MAP: Dict[str, tuple] = {
     # Web servers
     "apache":       (["apache", "http"], []),
@@ -755,7 +837,7 @@ _PRODUCT_MAP: Dict[str, tuple] = {
     "vmware":       (["vmware"],                   ["CVE-2021-21985", "CVE-2021-22005"]),
 }
 
-# Version prefix â†’ CVE IDs when product detected with specific version
+# Version prefix -> CVE IDs when product detected with specific version
 _VERSION_CVE_MAP: List[tuple] = [
     ("apache",   "2.4.49", ["CVE-2021-41773", "CVE-2021-42013"]),
     ("apache",   "2.4.50", ["CVE-2021-41773", "CVE-2021-42013"]),
@@ -777,47 +859,47 @@ _VERSION_CVE_MAP: List[tuple] = [
 
 # Scan categories to always include for web targets
 _BASE_WEB_SCAN_CATEGORIES: List[str] = [
-    "exposures",
-    "misconfigurations",
-    "panels",
+    "exposure",
+    "misconfig",
+    "panel",
     "api",
 ]
 
-# FFUF category â†’ Nuclei tags
+# FFUF category -> Nuclei tags
 _FFUF_TO_NUCLEI: Dict[str, List[str]] = {
-    "admin_panel":   ["panels", "default-logins"],
-    "git_exposure":  ["git-config", "exposures"],
-    "config_file":   ["exposures", "misconfiguration"],
-    "backup_file":   ["exposures"],
-    "secret_file":   ["exposures"],
+    "admin_panel":   ["panel", "default-logins"],
+    "git_exposure":  ["git-config", "exposure"],
+    "config_file":   ["exposure", "misconfig"],
+    "backup_file":   ["exposure"],
+    "secret_file":   ["exposure"],
     "api_docs":      ["api", "swagger"],
     "api_route":     ["api"],
-    "debug_endpoint":["misconfiguration", "exposures"],
-    "installer":     ["misconfiguration"],
-    "credentials":   ["exposures", "default-logins"],
-    "backup_archive":["exposures"],
+    "debug_endpoint":["misconfig", "exposure"],
+    "installer":     ["misconfig"],
+    "credentials":   ["exposure", "default-logins"],
+    "backup_archive":["exposure"],
 }
 
-# Tech string â†’ Nuclei tags (for Subfinder/Katana/HTTP probe technologies)
+# Tech string -> Nuclei tags (for Subfinder/Katana/HTTP probe technologies)
 _TECH_TO_NUCLEI: Dict[str, List[str]] = {
     "wordpress":   ["wordpress", "wp-plugin", "cve"],
     "drupal":      ["drupal", "cve"],
     "joomla":      ["joomla", "cve"],
-    "apache":      ["apache", "cve", "misconfiguration"],
-    "nginx":       ["nginx", "cve", "misconfiguration"],
+    "apache":      ["apache", "cve", "misconfig"],
+    "nginx":       ["nginx", "cve", "misconfig"],
     "iis":         ["iis", "microsoft", "cve"],
     "php":         ["php", "cve"],
     "laravel":     ["laravel", "php", "cve"],
-    "django":      ["django", "misconfiguration"],
+    "django":      ["django", "misconfig"],
     "spring":      ["spring", "java", "cve"],
     "tomcat":      ["tomcat", "apache", "cve"],
     "jenkins":     ["jenkins", "cve", "default-logins"],
     "gitlab":      ["gitlab", "cve"],
     "grafana":     ["grafana", "cve"],
-    "react":       ["api", "javascript"],
-    "angular":     ["api", "javascript"],
-    "vue":         ["api", "javascript"],
-    "next.js":     ["api", "javascript"],
+    "react":       ["exposure", "misconfig"],
+    "angular":     ["exposure", "misconfig"],
+    "vue":         ["exposure", "misconfig"],
+    "next.js":     ["exposure", "misconfig"],
     "cloudflare":  ["cloudflare", "waf-bypass"],
     "aws":         ["aws", "cloud", "s3"],
     "azure":       ["azure", "cloud"],
@@ -852,7 +934,7 @@ def _build_nuclei_context(
     service_summary:  List[str] = []
     tech_stack:       List[str] = []
 
-    # â”€â”€ 1. Nmap service/product â†’ tags + CVEs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR 1. Nmap service/product -> tags + CVEs a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     for host in nmap_result.get("data", {}).get("hosts", []):
         for port in host.get("ports", []):
             if port.get("state") != "open":
@@ -882,7 +964,7 @@ def _build_nuclei_context(
             if product or svc:
                 service_summary.append(f"{port_num}/{svc} {product} {version}".strip())
 
-        # â”€â”€ 2. Nmap HTTP probe technologies (from our enhanced nmap/server.py) â”€â”€
+        # a"EURa"EUR 2. Nmap HTTP probe technologies (from our enhanced nmap/server.py) a"EURa"EUR
         for port in host.get("ports", []):
             for tech in port.get("technologies", []):
                 tech_lower = tech.lower()
@@ -899,7 +981,7 @@ def _build_nuclei_context(
                     if kw in cdn.lower():
                         tags.update(kw_tags)
 
-    # â”€â”€ 3. Subfinder technologies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR 3. Subfinder technologies a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     for tech in (subfinder_result or {}).get("technologies", []):
         tech_lower = tech.lower()
         tech_stack.append(tech)
@@ -916,24 +998,24 @@ def _build_nuclei_context(
                 tags.update(kw_tags)
                 break
 
-    # â”€â”€ 4. FFUF severity findings â†’ targeted tags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR 4. FFUF severity findings -> targeted tags a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     ffuf_by_sev = (ffuf_result or {}).get("by_severity", {})
     for severity_level in ("critical", "high", "medium"):
         for ep in ffuf_by_sev.get(severity_level, [])[:15]:
             cat = ep.get("category", "")
             if cat in _FFUF_TO_NUCLEI:
                 tags.update(_FFUF_TO_NUCLEI[cat])
-            # If admin panel found â†’ add panels + default-logins
+            # If admin panel found -> add panels + default-logins
             if "admin" in ep.get("url", "").lower():
-                tags.update(["panels", "default-logins"])
+                tags.update(["panel", "default-logins"])
 
-    # â”€â”€ 5. Katana JS framework detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR 5. Katana JS framework detection a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     for ep in (katana_result or {}).get("endpoints", [])[:50]:
         cat = ep.get("category", "")
         if cat in ("api", "js"):
-            tags.update(["api", "javascript"])
+            tags.update(["api", "exposure"])
 
-    # â”€â”€ 6. Scan categories: always include base coverage for web targets â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR 6. Scan categories: always include base coverage for web targets a"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     # Added when there's any HTTP service or the target has web endpoints
     has_web = any(
         "http" in str(nmap_result.get("summary", {}).get("services", {}).get(str(p), {}).get("name", "")).lower()
@@ -941,9 +1023,9 @@ def _build_nuclei_context(
         for p in nmap_result.get("summary", {}).get("ports", [])
     )
     if has_web or not nmap_result.get("summary", {}).get("ports"):
-        tags.update(["exposures", "misconfiguration", "panels", "api"])
+        tags.update(["exposure", "misconfig", "panel", "api"])
 
-    # â”€â”€ 7. Ensure cloud bucket scanning if any cloud provider detected â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR 7. Ensure cloud bucket scanning if any cloud provider detected a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     if any(k in " ".join(tech_stack).lower() for k in ["aws", "azure", "gcp", "s3", "cloud"]):
         tags.update(["cloud", "aws", "azure", "s3", "bucket"])
 
@@ -958,10 +1040,10 @@ def _build_nuclei_context(
     }
 
 
-# â”€â”€ DÃ©tection automatique du serveur (Server: / X-Powered-By:) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Mapping mot-clÃ© serveur â†’ tags Nuclei. 100 % gÃ©nÃ©rique : on lit les headers
-# HTTP de la rÃ©ponse et on dÃ©duit les tags automatiquement. Aucun nom d'app /
-# aucune techno spÃ©cifique en dur.
+# a"EURa"EUR Detection automatique du serveur (Server: / X-Powered-By:) a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
+# Mapping mot-cle serveur -> tags Nuclei. 100 % generique : on lit les headers
+# HTTP de la reponse et on deduit les tags automatiquement. Aucun nom d'app /
+# aucune techno specifique en dur.
 
 _SERVER_HEADER_TO_TAGS: Dict[str, List[str]] = {
     "nginx":      ["nginx"],
@@ -999,17 +1081,17 @@ _SERVER_HEADER_TO_TAGS: Dict[str, List[str]] = {
     "envoy":      ["misconfiguration"],
 }
 
-# CatÃ©gories gÃ©nÃ©riques TOUJOURS incluses (jamais spÃ©cifiques Ã  une techno).
-_ALWAYS_INCLUDE_TAGS: List[str] = ["csp", "headers", "misconfig", "exposure", "cors", "xss", "sqli"]
+# Categories generiques TOUJOURS incluses (jamais specifiques a une techno).
+_ALWAYS_INCLUDE_TAGS: List[str] = ["exposure", "misconfig", "xss", "sqli", "unauth", "panel", "discovery", "tech", "headers", "cors", "csp", "redirect"]
 
 
 async def _fetch_server_tags(target: str, timeout: int = 8) -> Dict[str, Any]:
     """
     Lit Server: / X-Powered-By: (+ X-Generator, X-AspNet-Version) de la cible et
-    dÃ©duit automatiquement des tags Nuclei via _SERVER_HEADER_TO_TAGS.
+    deduit automatiquement des tags Nuclei via _SERVER_HEADER_TO_TAGS.
     Toujours rapide (timeout court) pour ne pas ralentir le pipeline.
-    Retourne {tags, server, powered_by, tech}. Les catÃ©gories gÃ©nÃ©riques
-    (_ALWAYS_INCLUDE_TAGS) sont toujours prÃ©sentes, mÃªme si la cible est
+    Retourne {tags, server, powered_by, tech}. Les categories generiques
+    (_ALWAYS_INCLUDE_TAGS) sont toujours presentes, meme si la cible est
     injoignable ou ne renvoie aucun header de techno.
     """
     url = target if target.startswith(("http://", "https://")) else f"http://{target}"
@@ -1035,14 +1117,120 @@ async def _fetch_server_tags(target: str, timeout: int = 8) -> Dict[str, Any]:
         if aspnet_ver:
             tags.update(["asp", "dotnet"])
     except Exception:
-        # cible injoignable / pas de service HTTP â€” on garde les tags gÃ©nÃ©riques
+        # cible injoignable / pas de service HTTP  --  on garde les tags generiques
         pass
     out["tags"] = sorted(tags)
     out["tech"] = sorted(set(out["tech"]))
     return out
 
 
-# â”€â”€ SOC Dashboard Report builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR SOC Dashboard Report builder a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
+
+
+def _match_lab_challenges(
+    challenges: List[Dict[str, Any]],
+    correlated_findings: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Strict whitelist-based matching. Only keywords that belong to one of three
+    tightly-scoped whitelists can trigger a match:
+      1. App-specific / proper-noun terms unique to Juice Shop
+      2. Endpoint route identifiers -- matched against matched_at URL only
+         (not just a finding title) to avoid false positives from shared words
+      3. Specific vulnerability technique terms (jwt, xxe, ssrf, ...)
+
+    Generic action verbs and broad security vocabulary ("bypass", "leak",
+    "retrieve", "exposure", "injection", ...) are implicitly excluded because
+    they are simply not in any whitelist. If no whitelisted keyword is found
+    in a challenge name, that challenge skips the match loop entirely and stays
+    only in detected_challenges. Zero matches is correct behavior when no
+    direct evidence exists.
+    """
+    # Filter out lab_challenge_api mirror findings -- they contain the challenge
+    # name by construction and would cause every challenge to auto-match itself.
+    _REAL_SCAN_SOURCES = {
+        "sqlmap", "nuclei", "zap", "nikto", "wapiti",
+        "ffuf", "dalfox", "gitleaks", "katana", "nmap",
+    }
+    real_findings = [
+        f for f in correlated_findings
+        if any(s.lower() in _REAL_SCAN_SOURCES for s in f.get("sources", []))
+    ]
+
+    # Whitelist 1: terms specific to Juice Shop or unusual proper nouns that
+    # would not appear in a generic scanner finding by coincidence.
+    _APP_SPECIFIC: set = {
+        "bjoern", "juicy", "blockchain", "captcha", "christmas", "ribbon",
+        "nft", "wallet", "chatbot", "deluxe", "kitten", "nullbyte",
+        "steganography", "forged", "primocrux", "recycled",
+    }
+
+    # Whitelist 2: concrete endpoint/route names.
+    # Rule: the keyword must appear in matched_at URL (path segment), NOT just
+    # in the finding title -- a title can mention "login" in an advisory context
+    # while testing a completely different endpoint.
+    _ENDPOINT_TERMS: set = {
+        "feedback", "search", "login", "register", "whoami", "challenges",
+        "basket", "checkout", "profile", "payment", "upload", "download",
+        "complaint", "tracking", "coupon", "invoice", "review",
+    }
+
+    # Whitelist 3: precise vulnerability technique identifiers that are
+    # sufficiently rare and specific to not appear in unrelated findings.
+    _VULN_SPECIFIC: set = {
+        "jwt", "deserialization", "xxe", "ssti", "ssrf", "ldap",
+        "xpath", "nosql", "graphql", "prototype",
+    }
+
+    matched: List[Dict[str, Any]] = []
+    for ch in challenges:
+        name = (ch.get("name") or "").strip()
+        if not name:
+            continue
+
+        tokens = {
+            w.lower()
+            for w in re.split(r"[\s\-'\"()\[\].,/]+", name)
+            if w
+        }
+
+        app_kws  = tokens & _APP_SPECIFIC
+        ep_kws   = tokens & _ENDPOINT_TERMS
+        vuln_kws = tokens & _VULN_SPECIFIC
+
+        # No whitelisted token in this challenge name -- skip entirely.
+        if not (app_kws or ep_kws or vuln_kws):
+            continue
+
+        for f in real_findings:
+            url   = (f.get("matched_at") or "").lower()
+            title = (f.get("title")      or "").lower()
+
+            # App-specific and vuln terms: match in URL or title.
+            hit = next(
+                (kw for kw in (app_kws | vuln_kws) if kw in url or kw in title),
+                None,
+            )
+
+            # Endpoint terms: stricter -- URL must contain the term so we know
+            # the scanner actually tested that specific route.
+            if hit is None:
+                hit = next((kw for kw in ep_kws if kw in url), None)
+
+            if hit:
+                matched.append({
+                    "challenge_id":            ch.get("id"),
+                    "challenge_name":          ch.get("name"),
+                    "challenge_category":      ch.get("category"),
+                    "matched_finding_id":      f.get("id"),
+                    "matched_finding_title":   f.get("title"),
+                    "matched_finding_sources": f.get("sources", []),
+                    "matched_at":              f.get("matched_at", ""),
+                    "matched_keyword":         hit,
+                })
+                break
+
+    return matched
 
 
 def _build_soc_report(
@@ -1068,7 +1256,7 @@ def _build_soc_report(
     else:
         risk_level = "INFORMATIONAL"
 
-    # â”€â”€ Retrieve all phase results from context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR Retrieve all phase results from context a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     shodan_data    = ctx.get_step_result("shodan")        or {}
     subfinder_data = ctx.get_step_result("subfinder")     or {}
     nmap_data      = ctx.get_step_result("nmap")          or {}
@@ -1081,8 +1269,10 @@ def _build_soc_report(
     katana_data    = ctx.get_step_result("katana")        or {}
     gitleaks_data  = ctx.get_step_result("gitleaks")      or {}
     sqlmap_data    = ctx.get_step_result("sqlmap")        or {}
+    idor_data      = ctx.get_step_result("idor")           or {}
     fp_data        = ctx.get_step_result("fp_reduction")  or {}
     auth_data      = ctx.get_step_result("auth_context")  or {}
+    lab_data       = ctx.get_step_result("lab_challenges") or {}
 
     open_ports   = nmap_data.get("summary", {}).get("ports", [])
     abuse_conf   = abuse_data.get("data", {}).get("abuse_confidence_score", 0)
@@ -1097,7 +1287,9 @@ def _build_soc_report(
     sqlmap_vuln   = sqlmap_data.get("vulnerable", False)
     sqlmap_skip   = sqlmap_data.get("skipped", False)
 
-    # â”€â”€ Executive summary (enriched with Phase 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR Executive summary (enriched with Phase 3) a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
+    idor_total = idor_data.get("total", 0)
+
     p3_extra = []
     if secrets_total > 0:
         p3_extra.append(f"{secrets_total} secret(s) exposed")
@@ -1105,6 +1297,8 @@ def _build_soc_report(
         p3_extra.append(f"{sqlmap_data.get('total', 0)} SQL injection(s)")
     if ffuf_critical + ffuf_high > 0:
         p3_extra.append(f"{ffuf_critical + ffuf_high} sensitive path(s)")
+    if idor_total > 0:
+        p3_extra.append(f"{idor_total} IDOR/Broken Access Control confirmed")
 
     executive_summary = (
         f"Target {target} presents a {risk_level} risk (score: {risk_score}/100). "
@@ -1117,7 +1311,7 @@ def _build_soc_report(
         f"Confidence: {risk_report.get('confidence_score', 0):.0f}%."
     )
 
-    # â”€â”€ Top 10 findings sorted by severity then exploitability â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR Top 10 findings sorted by severity then exploitability a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     _sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0, "informational": 0}
     sorted_findings = sorted(
         correlation_report.get("correlated_findings", []),
@@ -1132,38 +1326,45 @@ def _build_soc_report(
         for f in sorted_findings[:10]
     ]
 
-    # â”€â”€ Recommendations (ordered by priority, enriched with Phase 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR Recommendations (ordered by priority, enriched with Phase 3) a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     recommendations: List[str] = []
 
-    # Phase 3 â€” exploitation findings first (highest priority)
+    # Phase 3  --  exploitation findings first (highest priority)
+    if idor_total > 0:
+        idor_urls = [f.get("target_url", "") for f in idor_data.get("findings", [])[:2]]
+        recommendations.append(
+            f"CRITICAL: {idor_total} IDOR/Broken Access Control confirmed  --  "
+            f"unauthorized cross-account data access at: {', '.join(idor_urls) or 'see IDOR findings'}. "
+            "Implement server-side ownership checks on all resource endpoints"
+        )
     if secrets_crit > 0:
         recommendations.append(
-            f"CRITICAL: {secrets_crit} critical secret(s) exposed (API keys, private keys) â€” "
+            f"CRITICAL: {secrets_crit} critical secret(s) exposed (API keys, private keys)  --  "
             "rotate immediately and audit access logs"
         )
     if sqlmap_vuln:
         sqli_params = ", ".join(sqlmap_data.get("vulnerable_params", [])[:5])
         recommendations.append(
-            f"CRITICAL: SQL injection confirmed â€” parameter(s): {sqli_params or 'see findings'}. "
+            f"CRITICAL: SQL injection confirmed  --  parameter(s): {sqli_params or 'see findings'}. "
             "Apply parameterized queries immediately"
         )
     if secrets_high > 0:
         recommendations.append(
-            f"HIGH: {secrets_high} high-severity secret(s) detected â€” audit and rotate affected credentials"
+            f"HIGH: {secrets_high} high-severity secret(s) detected  --  audit and rotate affected credentials"
         )
     if ffuf_critical > 0:
         crit_urls = [ep.get("url", "") for ep in ffuf_by_sev.get("critical", [])[:3]]
         recommendations.append(
-            f"CRITICAL: {ffuf_critical} critical path(s) exposed ({', '.join(crit_urls[:2]) or 'see FFUF findings'}) â€” "
+            f"CRITICAL: {ffuf_critical} critical path(s) exposed ({', '.join(crit_urls[:2]) or 'see FFUF findings'})  --  "
             "restrict access immediately"
         )
     if ffuf_high > 0:
         recommendations.append(
-            f"HIGH: {ffuf_high} sensitive path(s) accessible (admin panels, config files) â€” "
+            f"HIGH: {ffuf_high} sensitive path(s) accessible (admin panels, config files)  --  "
             "restrict or remove from public access"
         )
 
-    # Phase 1/2 â€” standard vuln recommendations
+    # Phase 1/2  --  standard vuln recommendations
     if by_sev.get("critical", 0) > 0:
         recommendations.append(
             "IMMEDIATE ACTION: Patch or isolate services with critical CVEs"
@@ -1181,26 +1382,26 @@ def _build_soc_report(
 
     if abuse_conf > 60:
         recommendations.append(
-            "ALERT: IP actively flagged as malicious (AbuseIPDB) â€” investigate for compromise"
+            "ALERT: IP actively flagged as malicious (AbuseIPDB)  --  investigate for compromise"
         )
 
     api_count = len(katana_data.get("api_endpoints", []))
     if api_count > 0:
         recommendations.append(
-            f"MEDIUM: {api_count} API endpoint(s) discovered via JS crawling â€” "
+            f"MEDIUM: {api_count} API endpoint(s) discovered via JS crawling  --  "
             "verify authentication and authorization controls"
         )
 
     if risk_report.get("exploitability_score", 0) > 70:
         recommendations.append(
-            "HIGH: Multiple exploitable services detected â€” prioritize patch management"
+            "HIGH: Multiple exploitable services detected  --  prioritize patch management"
         )
 
     recommendations.append(
         "ONGOING: Enable continuous monitoring and schedule periodic rescans"
     )
 
-    # â”€â”€ Phases summary â€” aligned on the 5-phase pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # a"EURa"EUR Phases summary  --  aligned on the 5-phase pipeline a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
     fp_reduction = correlation_report.get("fp_reduction", {})
 
     phases_summary = {
@@ -1214,7 +1415,7 @@ def _build_soc_report(
             "status":     "error" if auth_data.get("error") else "complete",
         },
         "phase_1_recon": {
-            "phase":            "Phase 1 â€” Recon",
+            "phase":            "Phase 1  --  Recon",
             "tools":            ["Shodan", "Subfinder", "Nmap", "AbuseIPDB", "VirusTotal"],
             "status":           "error" if (nmap_data.get("error") and subfinder_data.get("error")) else "complete",
             # Shodan
@@ -1233,7 +1434,7 @@ def _build_soc_report(
             "vt_malicious":     vt_data.get("data", {}).get("malicious", 0),
         },
         "phase_2_active_scan": {
-            "phase":            "Phase 2 â€” Active Scan",
+            "phase":            "Phase 2  --  Active Scan",
             "tools":            ["OWASP ZAP", "Nuclei", "Dalfox"],
             "status":           "error" if (zap_data.get("error") and nuclei_data.get("error")) else "complete",
             # ZAP
@@ -1253,8 +1454,8 @@ def _build_soc_report(
             "dalfox_error":     dalfox_data.get("error"),
         },
         "phase_3_exploitation": {
-            "phase":            "Phase 3 â€” Exploitation",
-            "tools":            ["FFUF", "Katana", "GitLeaks", "SQLMap"],
+            "phase":            "Phase 3  --  Exploitation",
+            "tools":            ["FFUF", "Katana", "GitLeaks", "SQLMap", "IDOR"],
             "status":           "complete",
             # FFUF
             "ffuf_total":       ffuf_data.get("total", 0),
@@ -1277,9 +1478,15 @@ def _build_soc_report(
             "sqlmap_params":    sqlmap_data.get("vulnerable_params", []),
             "sqlmap_skip_reason": sqlmap_data.get("reason") if sqlmap_skip else None,
             "sqlmap_error":     sqlmap_data.get("error"),
+            # IDOR
+            "idor_ran":         not idor_data.get("skipped", True),
+            "idor_confirmed":   idor_data.get("total", 0),
+            "idor_findings":    idor_data.get("findings", []),
+            "idor_skip_reason": idor_data.get("reason") if idor_data.get("skipped") else None,
+            "idor_error":       idor_data.get("error"),
         },
         "phase_4_correlation": {
-            "phase":            "Phase 4 â€” Correlation",
+            "phase":            "Phase 4  --  Correlation",
             "tools":            ["Correlation Engine", "FP Reduction", "Risk Scoring"],
             "status":           "error" if correlation_report.get("error") else "complete",
             "total_correlated": total_f,
@@ -1299,7 +1506,7 @@ def _build_soc_report(
             "confidence":       risk_report.get("confidence_score", 0),
         },
         "phase_5_soc_dashboard": {
-            "phase":            "Phase 5 â€” SOC Dashboard",
+            "phase":            "Phase 5  --  SOC Dashboard",
             "tools":            ["SOC Report", "AI Analysis"],
             "status":           "complete",
             "top_findings_count": len(top_findings),
@@ -1307,6 +1514,29 @@ def _build_soc_report(
             "attack_paths_count": len(correlation_report.get("attack_paths", [])),
         },
     }
+
+    detected_challenges: List[Dict[str, Any]] = []
+    matched_challenges: List[Dict[str, Any]] = []
+    if lab_mode and lab_data.get("detected"):
+        detected_challenges = [
+            {
+                "id":         ch.get("id"),
+                "name":       ch.get("name"),
+                "category":   ch.get("category"),
+                "difficulty": ch.get("difficulty"),
+                "solved":     ch.get("solved", False),
+            }
+            for ch in lab_data.get("challenges", [])
+        ]
+        matched_challenges = _match_lab_challenges(
+            lab_data.get("challenges", []),
+            correlation_report.get("correlated_findings", []),
+        )
+        logger.info(
+            "[SOC] Lab challenges: %d detected, %d strict textual match(es)",
+            len(detected_challenges),
+            len(matched_challenges),
+        )
 
     return {
         "scan_id":            scan_id,
@@ -1324,12 +1554,14 @@ def _build_soc_report(
         "top_findings":       top_findings,
         "attack_paths":       correlation_report.get("attack_paths", []),
         "recommendations":    recommendations,
+        "detected_challenges": detected_challenges,
+        "matched_challenges":  matched_challenges,
         "phases_summary":     phases_summary,
         "generated_at":       datetime.utcnow().isoformat(),
     }
 
 
-# â”€â”€ Fallback AI analysis (rule-based, no LLM needed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR Fallback AI analysis (rule-based, no LLM needed) a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
 
 
 def _build_fallback_ai_analysis(
@@ -1340,10 +1572,10 @@ def _build_fallback_ai_analysis(
     reason: str = "",
 ) -> Dict[str, Any]:
     """
-    GÃ©nÃ¨re une analyse structurÃ©e sans LLM.
-    AppelÃ© quand Gemini est indisponible, dÃ©sactivÃ©, ou retourne une erreur.
-    Ne retourne jamais N/A â€” utilise les findings corrÃ©latÃ©s comme source.
-    Produit la mÃªme structure JSON qu'une vraie rÃ©ponse IA.
+    Genere une analyse structuree sans LLM.
+    Appele quand Gemini est indisponible, desactive, ou retourne une erreur.
+    Ne retourne jamais N/A  --  utilise les findings correlates comme source.
+    Produit la meme structure JSON qu'une vraie reponse IA.
     """
     by_sev       = correlation_report.get("by_severity", {})
     findings     = correlation_report.get("correlated_findings", [])
@@ -1365,7 +1597,7 @@ def _build_fallback_ai_analysis(
 
     soc_summary = (
         f"Target {target}: {risk_level} risk (score {risk_score}/100). "
-        f"{n_conf} confirmed finding(s) â€” critical: {n_crit}, high: {n_high}, medium: {n_med}. "
+        f"{n_conf} confirmed finding(s)  --  critical: {n_crit}, high: {n_high}, medium: {n_med}. "
         + (f"Primary vector: {attack_paths[0][:120]}." if attack_paths else "No active attack paths.")
     )
 
@@ -1411,7 +1643,7 @@ def _build_fallback_ai_analysis(
         "soc_summary":         soc_summary,
         "executive_summary":   exec_summary,
         "risk_score_analysis": (
-            f"Score {risk_score}/100 â€” rule-based derivation from {n_conf} confirmed findings "
+            f"Score {risk_score}/100  --  rule-based derivation from {n_conf} confirmed findings "
             f"(AI analysis unavailable: {reason or 'no key or disabled'})."
         ),
         "attack_narrative": (
@@ -1439,7 +1671,7 @@ def _build_fallback_ai_analysis(
     }
 
 
-# â”€â”€ Celery task â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# a"EURa"EUR Celery task a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
 
 
 @celery_app.task(
@@ -1447,8 +1679,8 @@ def _build_fallback_ai_analysis(
     name="scan_tasks.run_scan",
     max_retries=3,
     default_retry_delay=30,
-    soft_time_limit=1200,
-    time_limit=1500,
+    soft_time_limit=2400,
+    time_limit=2700,
     queue="default",
 )
 def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, lab_mode: bool = True) -> Dict[str, Any]:
@@ -1484,22 +1716,22 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         target   = scan.target
         lock_key = f"scan_lock:{target}"
 
-        # â”€â”€ Anti-doublon : abandon si un scan tourne dÃ©jÃ  sur cette cible â”€â”€â”€â”€
+        # a"EURa"EUR Anti-doublon : abandon si un scan tourne deja sur cette cible a"EURa"EURa"EURa"EUR
         if r.get(lock_key):
             existing = r.get(lock_key)
-            logger.warning("[LOCK] Scan dÃ©jÃ  en cours sur %s (scan_id=%s) â€” abandon", target, existing)
+            logger.warning("[LOCK] Scan deja en cours sur %s (scan_id=%s)  --  abandon", target, existing)
             _update_scan(db, scan, status=ScanStatus.failed,
                          progress=0, current_phase="skipped_duplicate",
-                         error_message=f"Un scan est dÃ©jÃ  en cours sur {target}. Veuillez attendre sa fin avant d'en lancer un nouveau.")
+                         error_message=f"Un scan est deja en cours sur {target}. Veuillez attendre sa fin avant d'en lancer un nouveau.")
             return {"status": "skipped_duplicate", "reason": f"Scan already running on {target}"}
         r.set(lock_key, scan_id, ex=1500)
 
         ctx    = PipelineContext(scan_id, settings.REDIS_URL, db)
 
         logger.info(
-            "[MODE] lab_mode=%s â€” %s",
+            "[MODE] lab_mode=%s  --  %s",
             "ON" if lab_mode else "OFF",
-            "Lab Challenge API activÃ©e" if lab_mode else "DÃ©tection 100% active (sans Lab API)",
+            "Lab Challenge API activee" if lab_mode else "Detection 100% active (sans Lab API)",
         )
         plog.info(f"Scan started for target: {target}", tool="orchestrator")
 
@@ -1508,12 +1740,12 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         _add_log(db, scan_id, f"Scan started for target: {target}")
         logger.debug("[BUILD-CHECK] pipeline SEQUENTIEL v2 actif")
 
-        # PHASE 1 â€” RECON
+        # PHASE 1  --  RECON
         _update_scan(db, scan, current_phase="recon", progress=2)
         _publish(r, scan_id, "running", 2,
-                 "[Phase 1/5] Recon â€” Shodan âˆ¥ Subfinder âˆ¥ Nmap âˆ¥ AbuseIPDB âˆ¥ VirusTotal (parallel)...")
+                 "[Phase 1/5] Recon  --  Shodan || Subfinder || Nmap || AbuseIPDB || VirusTotal (parallel)...")
         _add_log(db, scan_id,
-                 "â•â•â• Phase 1/5: Recon (Shodan âˆ¥ Subfinder âˆ¥ Nmap âˆ¥ AbuseIPDB âˆ¥ VirusTotal) â•â•â•")
+                 "a*a*a* Phase 1/5: Recon (Shodan || Subfinder || Nmap || AbuseIPDB || VirusTotal) a*a*a*")
 
         async def _do_phase1():
             async def _safe_shodan():
@@ -1550,9 +1782,9 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 asyncio.wait_for(_do_phase1(), timeout=_PHASE1_MAX_SECONDS)
             )
         except asyncio.TimeoutError:
-            logger.error("[P1] TIMEOUT GLOBAL %ds â€” phase interrompue, rÃ©sultats partiels conservÃ©s", _PHASE1_MAX_SECONDS)
+            logger.error("[P1] TIMEOUT GLOBAL %ds  --  phase interrompue, resultats partiels conserves", _PHASE1_MAX_SECONDS)
             _add_log(db, scan_id,
-                     f"[P1] TIMEOUT GLOBAL {_PHASE1_MAX_SECONDS}s â€” recon interrompue, scan continue avec donnÃ©es partielles",
+                     f"[P1] TIMEOUT GLOBAL {_PHASE1_MAX_SECONDS}s  --  recon interrompue, scan continue avec donnees partielles",
                      level="error")
             shodan_result    = _p1_default.copy()
             subfinder_result = {"error": "phase1_timeout", "subdomains": [], "total": 0}
@@ -1603,7 +1835,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 svc   = svc_map.get(str(port_num), {})
                 techs = svc.get("technologies", [])
                 _add_log(db, scan_id,
-                         f"  Port {port_num}/{svc.get('protocol', 'tcp')} â€” "
+                         f"  Port {port_num}/{svc.get('protocol', 'tcp')}  --  "
                          f"{svc.get('name', 'unknown')} {svc.get('product', '')} {svc.get('version', '')}".strip()
                          + (f" | techs: {', '.join(techs[:3])}" if techs else ""))
         ctx.save_step_result("nmap", nmap_result)
@@ -1631,7 +1863,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         ctx.save_step_result("abuseipdb", abuse_result)
         _update_scan(db, scan, abuseipdb_data=abuse_result, progress=22)
 
-        # â”€â”€ ThreatIntel enrichment for IPs discovered by Nmap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # a"EURa"EUR ThreatIntel enrichment for IPs discovered by Nmap a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
         discovered_ips = _extract_discovered_ips(nmap_result, target)
         if discovered_ips:
             _add_log(db, scan_id,
@@ -1666,22 +1898,22 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             _update_scan(db, scan, virustotal_data=vt_result, abuseipdb_data=abuse_result)
 
         _update_scan(db, scan, progress=25)
-        _publish(r, scan_id, "running", 25, "Phase 1/5 â€” Recon complete âœ”")
-        _add_log(db, scan_id, "Phase 1/5 complete âœ”")
+        _publish(r, scan_id, "running", 25, "Phase 1/5  --  Recon complete [OK]")
+        _add_log(db, scan_id, "Phase 1/5 complete [OK]")
 
-        # PHASE 1.2 â€” AGENT IA DE DÃ‰CISION
-        _add_log(db, scan_id, "â•â•â• Agent IA de dÃ©cision â€” analyse contexte Nmap + headers â•â•â•")
+        # PHASE 1.2  --  AGENT IA DE DECISION
+        _add_log(db, scan_id, "a*a*a* Agent IA de decision  --  analyse contexte Nmap + headers a*a*a*")
 
-        # Server headers (rapide, timeout 8s) â€” pour agent decision + tags Nuclei Phase 2
+        # Server headers (rapide, timeout 8s)  --  pour agent decision + tags Nuclei Phase 2
         server_tags_info = loop.run_until_complete(_fetch_server_tags(target, timeout=8))
         ctx.save_step_result("server_detection", server_tags_info)
         if server_tags_info.get("server") or server_tags_info.get("powered_by"):
             _add_log(db, scan_id,
                      f"[P1.2] Server: '{server_tags_info.get('server', '')}' "
                      f"X-Powered-By: '{server_tags_info.get('powered_by', '')}' "
-                     f"â†’ tech: {', '.join(server_tags_info.get('tech', [])) or 'n/a'}")
+                     f"-> tech: {', '.join(server_tags_info.get('tech', [])) or 'n/a'}")
         else:
-            _add_log(db, scan_id, "[P1.2] Server detection: aucun header serveur exposÃ©")
+            _add_log(db, scan_id, "[P1.2] Server detection: aucun header serveur expose")
 
         _agent_headers: Dict[str, str] = {
             "server":       server_tags_info.get("server", ""),
@@ -1697,7 +1929,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             )
         except Exception as _agent_exc:
             _add_log(db, scan_id,
-                     f"[AgentAI] Error: {_agent_exc!r} â€” all tools will run",
+                     f"[AgentAI] Error: {_agent_exc!r}  --  all tools will run",
                      level="warning")
             agent_decision = {
                 "tools":       ["subfinder", "zap", "nuclei", "dalfox", "ffuf",
@@ -1720,22 +1952,29 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         if agent_decision.get("nuclei_tags"):
             _add_log(db, scan_id,
                      f"  [AGENT TAGS] nuclei: {', '.join(agent_decision['nuclei_tags'][:12])}")
+        if agent_decision.get("probe_pack_ids"):
+            _add_log(db, scan_id,
+                     f"[ProbePacks] Selected: {', '.join(agent_decision['probe_pack_ids'])} "
+                     f"(detected: {agent_decision.get('probe_pack_reasons', '')})")
+        else:
+            _add_log(db, scan_id,
+                     "[ProbePacks] No pack selected by agent -- fallback generic_rest_api will be used")
         ctx.save_step_result("agent_decision", agent_decision)
 
-        # PHASE 1.5 â€” AUTH DETECTION
+        # PHASE 1.5  --  AUTH DETECTION
         _add_log(db, scan_id,
-                 "â•â•â• Auth Detection â€” dÃ©tection + authentification automatique â•â•â•")
+                 "a*a*a* Auth Detection  --  detection + authentification automatique a*a*a*")
         if settings.AUTO_AUTH_ENABLED and not credentials:
             _add_log(db, scan_id,
-                     "[Auth] Mode automatique : dÃ©tection du type + tentative "
-                     "d'enregistrement d'un compte alÃ©atoire / credentials par dÃ©faut")
+                     "[Auth] Mode automatique : detection du type + tentative "
+                     "d'enregistrement d'un compte aleatoire / credentials par defaut")
         auth_ctx: AuthContext = AuthContext.empty()
         try:
             creds = AuthCredentials.from_dict(credentials) if credentials else None
-            # Cap global 75s sur toute la dÃ©tection+auth (wait_for).
-            # timeout=30.0 interne : donne 15s Ã  detect_auth_type et 20s Ã 
-            # _auto_authenticate (register + sleep(1) + login) â€” suffisant pour
-            # les SPA Node.js (Juice Shop) qui peuvent prendre 3-5s par requÃªte.
+            # Cap global 75s sur toute la detection+auth (wait_for).
+            # timeout=30.0 interne : donne 15s a detect_auth_type et 20s a
+            # _auto_authenticate (register + sleep(1) + login)  --  suffisant pour
+            # les SPA Node.js (Juice Shop) qui peuvent prendre 3-5s par requete.
             auth_ctx = loop.run_until_complete(
                 asyncio.wait_for(
                     detect_and_authenticate(
@@ -1751,7 +1990,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 + (f" | login={auth_ctx.login_url}" if auth_ctx.login_url else "")
                 + (f" | {len(auth_ctx.headers)} header(s), {len(auth_ctx.cookies)} cookie(s)"
                    if auth_ctx.has_auth() else " | unauthenticated scan")
-                + (f" | âš  {auth_ctx.error}" if auth_ctx.error else "")
+                + (f" |  {auth_ctx.error}" if auth_ctx.error else "")
             )
             _add_log(db, scan_id, f"[Auth] {auth_summary}",
                      level="warning" if auth_ctx.error else "info")
@@ -1759,33 +1998,33 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 _add_log(db, scan_id, f"[Auth] {auth_ctx.notes}")
             if auth_ctx.has_auth():
                 _add_log(db, scan_id,
-                         "[Auth] âœ” Session obtenue â€” injection dans ZAP, Nuclei, FFUF, SQLMap",
+                         "[Auth] [OK] Session obtenue  --  injection dans ZAP, Nuclei, FFUF, SQLMap",
                          level="info")
             else:
                 _add_log(db, scan_id,
-                         "[Auth] Aucune session obtenue â€” scan non authentifiÃ©",
+                         "[Auth] Aucune session obtenue  --  scan non authentifie",
                          level="warning")
         except Exception as _auth_exc:
             _add_log(db, scan_id,
-                     f"[Auth] Detection error/timeout: {_auth_exc!r} â€” scan continues unauthenticated",
+                     f"[Auth] Detection error/timeout: {_auth_exc!r}  --  scan continues unauthenticated",
                      level="warning")
             auth_ctx = AuthContext.empty()
 
         ctx.save_step_result("auth_context", auth_ctx.to_dict())
         _update_scan(db, scan, auth_config=auth_ctx.to_dict(), progress=27)
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # PHASE 2 â€” ACTIVE SCAN  (27 â†’ 55%)
-        # Parallel: ZAP âˆ¥ Nuclei (enriched with Nmap Phase 1) âˆ¥ Dalfox
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
+        # PHASE 2  --  ACTIVE SCAN  (27 -> 55%)
+        # Parallel: ZAP || Nuclei (enriched with Nmap Phase 1) || Dalfox
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
         _update_scan(db, scan, current_phase="active_scan", progress=27)
         _publish(r, scan_id, "running", 27,
-                 "[Phase 2/5] Active Scan â€” ZAP âˆ¥ Nuclei (enriched Nmap) âˆ¥ Dalfox (parallel)...")
-        _add_log(db, scan_id, "â•â•â• Phase 2/5: Active Scan (ZAP âˆ¥ Nuclei âˆ¥ Dalfox) â•â•â•")
+                 "[Phase 2/5] Active Scan  --  ZAP || Nuclei (enriched Nmap) || Dalfox (parallel)...")
+        _add_log(db, scan_id, "a*a*a* Phase 2/5: Active Scan (ZAP || Nuclei || Dalfox) a*a*a*")
 
         # server_tags_info already computed in Phase 1.2 (agent decision block)
 
-        # Nuclei context built from Nmap (Phase 1) + Subfinder â€” FFUF/Katana not yet run
+        # Nuclei context built from Nmap (Phase 1) + Subfinder  --  FFUF/Katana not yet run
         nuclei_ctx  = _build_nuclei_context(
             nmap_result      = nmap_result,
             subfinder_result = subfinder_result,
@@ -1793,7 +2032,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             katana_result    = None,
         )
 
-        # Enrichissement des tags selon les technos dÃ©tectÃ©es (headers serveur + ports Nmap)
+        # Enrichissement des tags selon les technos detectees (headers serveur + ports Nmap)
         _tech_extra_tags: set = set()
         _all_tech_str = " ".join(
             server_tags_info.get("tech", [])
@@ -1804,12 +2043,12 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         if "node" in _all_tech_str or "express" in _all_tech_str or 3000 in _open_ports:
             _tech_extra_tags.update(["nodejs", "jwt", "nosql", "express"])
         if "angular" in _all_tech_str:
-            _tech_extra_tags.update(["angular", "xss", "csrf"])
+            _tech_extra_tags.update(["xss", "misconfig"])
         if any(k in _all_tech_str for k in ("api", "rest", "express", "fastapi", "graphql")):
             _tech_extra_tags.update(["api", "rest", "graphql", "swagger"])
 
-        # Merge des tags dÃ©duits des headers serveur + catÃ©gories gÃ©nÃ©riques toujours
-        # prÃ©sentes (csp, headers, misconfig, exposure, cors, xss, sqli).
+        # Merge des tags deduits des headers serveur + categories generiques toujours
+        # presentes (csp, headers, misconfig, exposure, cors, xss, sqli).
         nuclei_ctx["tags"] = sorted(
             set(nuclei_ctx.get("tags", []))
             | set(server_tags_info.get("tags", []))
@@ -1826,37 +2065,55 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         _add_log(db, scan_id,
                  f"[P2] Nuclei: {n_templates} targeted CVEs, {n_tags} tags from Nmap context")
 
+        # Fix 3: Nuclei quick scan mode -- reduce scope when no targeted CVEs detected
+        # Avoids loading 1400+ generic templates on a SPA/Node.js target with no known CVEs.
+        _nuclei_severity = "info,low,medium,high,critical"
+        _NUCLEI_QUICK_TAGS = ["exposure", "misconfig", "headers", "csp", "cors", "tech", "discovery"]
+        if not nuclei_ctx["template_ids"] and len(nuclei_ctx["tags"]) > 8:
+            nuclei_ctx["tags"] = _NUCLEI_QUICK_TAGS
+            _nuclei_severity   = "medium,high,critical"
+            logger.info("[Nuclei] Quick scan mode -- no targeted CVEs, reduced to %d tags + severity>=medium",
+                        len(_NUCLEI_QUICK_TAGS))
+            _add_log(db, scan_id,
+                     f"[P2] Nuclei quick scan: no targeted CVEs, scope reduced to "
+                     f"{len(_NUCLEI_QUICK_TAGS)} tags (severity>=medium) -- estimee 3-4min")
+
         _auth_h = auth_ctx.headers or None
         _auth_c = auth_ctx.cookies or None
 
-        # Health check avant Phase 2 â€” Ã©vite de lancer les scanners si la cible
-        # est dÃ©jÃ  saturÃ©e (CPU 100% aprÃ¨s Phase 1).
-        _add_log(db, scan_id, "[HEALTH] VÃ©rification disponibilitÃ© cible avant Phase 2...")
+        # Health check avant Phase 2  --  evite de lancer les scanners si la cible
+        # est deja saturee (CPU 100% apres Phase 1).
+        _add_log(db, scan_id, "[HEALTH] Verification disponibilite cible avant Phase 2...")
         _target_ok_p2 = loop.run_until_complete(_wait_for_target(target))
         if not _target_ok_p2:
             _add_log(db, scan_id,
-                     "[HEALTH] Cible KO â€” Phase 2 continue (rÃ©sultats partiels possibles)",
+                     "[HEALTH] Cible KO  --  Phase 2 continue (resultats partiels possibles)",
                      level="warning")
         else:
-            # Cooldown : laisser la cible (ex: Juice Shop Node.js) finir de traiter
-            # les connexions Phase 1 avant que Nuclei ouvre 10 connexions simultanÃ©es.
-            # Sans ce dÃ©lai, Nuclei marque la cible "unresponsive" et retourne 0 findings.
             import time as _time
-            _add_log(db, scan_id, "[HEALTH] Cible OK â€” cooldown 10s avant scan actif...")
+            _add_log(db, scan_id, "[HEALTH] Cible OK  --  cooldown 10s avant scan actif...")
             _time.sleep(10)
 
-        # Mode SÃ‰QUENTIEL (low-RAM) : les scanners tournent UN PAR UN avec 5s
-        # de pause entre chaque pour laisser la cible rÃ©cupÃ©rer son CPU.
-        # Ordre : FFUF rapide â†’ Nuclei â†’ Dalfox â€” ZAP dÃ©placÃ© en Phase 3
-        # aprÃ¨s le FFUF complet (endpoints rÃ©els disponibles).
+        # Fix 1: Phase 2 PARALLELE -- Nuclei || FFUF rapide || Dalfox simultanement.
+        # Dalfox utilise des URLs generiques (fallback) car FFUF tourne en meme temps.
         async def _do_phase2():
-            # 1. Nuclei en premier â€” avant que FFUF Ã©puise la cible
-            # Seulement les CVE template IDs ciblÃ©s â€” les rÃ©pertoires (misconfiguration/
-            # exposures/ technologies/) sont gÃ©rÃ©s par cmd1 dans le service nuclei.
-            # Les passer ici via -id serait invalide et cause exit 2.
             _nuclei_templates = nuclei_ctx["template_ids"] or []
-            if "nuclei" in tools_to_run:
-                _nuclei = await _call_nuclei(
+            _base = target if target.startswith(("http://", "https://")) else f"http://{target}"
+            _dalfox_fallback_urls = [
+                f"{_base.rstrip('/')}/?q=test",
+                f"{_base.rstrip('/')}/search?q=test",
+                f"{_base.rstrip('/')}/api/search?q=test",
+                f"{_base.rstrip('/')}/api/v1/search?q=test",
+            ]
+
+            async def _p2_nuclei():
+                if "nuclei" not in tools_to_run:
+                    return {
+                        "target": target, "skipped": True, "findings": [], "total": 0,
+                        "by_severity": {}, "error": None,
+                        "reason": agent_decision["reasons"].get("nuclei", "skipped by agent decision"),
+                    }
+                return await _call_nuclei(
                     target,
                     templates       = _nuclei_templates or None,
                     tags            = nuclei_ctx["tags"] or None,
@@ -1865,64 +2122,65 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                     scan_categories = scan_cats or None,
                     auth_headers    = _auth_h,
                     auth_cookies    = _auth_c,
-                    severity        = "info,low,medium,high,critical",
+                    severity        = _nuclei_severity,
                 )
-            else:
-                _nuclei = {
-                    "target": target, "skipped": True, "findings": [], "total": 0,
-                    "by_severity": {}, "error": None,
-                    "reason": agent_decision["reasons"].get("nuclei", "skipped by agent decision"),
-                }
-            await asyncio.sleep(5)
-            # 2. FFUF rapide â€” endpoints pour alimenter Dalfox (aprÃ¨s Nuclei)
-            # Wordlist fallback (164 entrÃ©es + universal base) : rapide, ne sature pas la cible.
-            # La Phase 3 fait le scan complet avec la wordlist principale (4750+ entrÃ©es).
-            if "ffuf" in tools_to_run:
-                _ffuf_quick = await _call_ffuf(
+
+            async def _p2_ffuf():
+                if "ffuf" not in tools_to_run:
+                    return {
+                        "target": target, "skipped": True, "endpoints": [], "total": 0,
+                        "by_status": {}, "by_category": {}, "by_severity": {}, "error": None,
+                        "reason": agent_decision["reasons"].get("ffuf", "skipped by agent decision"),
+                    }
+                # Delai initial : laisse Nuclei charger ses templates (20s) avant de
+                # demarrer FFUF -- reduit la contention HTTP sur la cible au demarrage.
+                await asyncio.sleep(20)
+                return await _call_ffuf(
                     target, timeout=60, wordlist="fallback",
-                    auth_headers=_auth_h, auth_cookies=_auth_c
+                    auth_headers=_auth_h, auth_cookies=_auth_c,
                 )
-                await asyncio.sleep(8)
-            else:
-                _ffuf_quick = {
-                    "target": target, "skipped": True, "endpoints": [], "total": 0,
-                    "by_status": {}, "by_category": {}, "by_severity": {}, "error": None,
-                    "reason": agent_decision["reasons"].get("ffuf", "skipped by agent decision"),
-                }
-            # 3. Dalfox â€” URLs avec paramÃ¨tres issues du FFUF rapide
-            if "dalfox" in tools_to_run:
-                _base = target if target.startswith(("http://", "https://")) else f"http://{target}"
-                _dalfox_urls = [
-                    ep["url"] for ep in _ffuf_quick.get("endpoints", [])
-                    if "?" in ep.get("url", "")
-                ]
-                # Fallback gÃ©nÃ©rique si aucune URL avec paramÃ¨tre dÃ©couverte par FFUF
-                if not _dalfox_urls:
-                    _dalfox_urls = [
-                        f"{_base.rstrip('/')}/?q=test",
-                        f"{_base.rstrip('/')}/search?q=test",
-                        f"{_base.rstrip('/')}/api/search?q=test",
-                    ]
-                _dalfox_urls = list(dict.fromkeys(_dalfox_urls))[:10]
-                _dalfox = await _call_dalfox(
-                    target, timeout=45, urls=_dalfox_urls, auth_headers=_auth_h or None
+
+            async def _p2_dalfox():
+                if "dalfox" not in tools_to_run:
+                    return {
+                        "target": target, "skipped": True, "findings": [], "total": 0,
+                        "by_severity": {}, "error": None,
+                        "reason": agent_decision["reasons"].get("dalfox", "skipped by agent decision"),
+                    }
+                # Meme delai que FFUF : demarre apres 20s pour eviter contention initiale.
+                await asyncio.sleep(20)
+                logger.info("[Dalfox] Phase 2 parallel -- using %d generic fallback URLs",
+                            len(_dalfox_fallback_urls))
+                return await _call_dalfox(
+                    target, timeout=180, urls=_dalfox_fallback_urls, auth_headers=_auth_h or None,
                 )
-            else:
-                _dalfox = {
-                    "target": target, "skipped": True, "findings": [], "total": 0,
-                    "by_severity": {}, "error": None,
-                    "reason": agent_decision["reasons"].get("dalfox", "skipped by agent decision"),
-                }
-            return _ffuf_quick, _dalfox, _nuclei
+
+            _r2 = await asyncio.gather(
+                _p2_nuclei(), _p2_ffuf(), _p2_dalfox(),
+                return_exceptions=True,
+            )
+
+            _def_nuclei = {"target": target, "skipped": True, "findings": [], "total": 0,
+                           "by_severity": {}, "error": None}
+            _def_ffuf   = {"target": target, "skipped": True, "endpoints": [], "total": 0,
+                           "by_status": {}, "by_category": {}, "by_severity": {}, "error": None}
+            _def_dalfox = {"target": target, "skipped": True, "findings": [], "total": 0,
+                           "by_severity": {}, "error": None}
+
+            _nuclei_r = _r2[0] if not isinstance(_r2[0], Exception) else {**_def_nuclei, "error": str(_r2[0])}
+            _ffuf_q   = _r2[1] if not isinstance(_r2[1], Exception) else {**_def_ffuf,   "error": str(_r2[1])}
+            _dalfox_r = _r2[2] if not isinstance(_r2[2], Exception) else {**_def_dalfox, "error": str(_r2[2])}
+
+            return _ffuf_q, _dalfox_r, _nuclei_r
 
         try:
             ffuf_quick, dalfox_result, nuclei_result = loop.run_until_complete(
                 asyncio.wait_for(_do_phase2(), timeout=_PHASE2_MAX_SECONDS)
             )
         except asyncio.TimeoutError:
-            logger.error("[P2] TIMEOUT GLOBAL %ds â€” phase interrompue, rÃ©sultats partiels conservÃ©s", _PHASE2_MAX_SECONDS)
+            logger.error("[P2] TIMEOUT GLOBAL %ds  --  phase interrompue, resultats partiels conserves", _PHASE2_MAX_SECONDS)
             _add_log(db, scan_id,
-                     f"[P2] TIMEOUT GLOBAL {_PHASE2_MAX_SECONDS}s â€” active scan interrompu, scan continue",
+                     f"[P2] TIMEOUT GLOBAL {_PHASE2_MAX_SECONDS}s  --  active scan interrompu, scan continue",
                      level="error")
             _p2_skip = {"skipped": True, "error": "phase2_timeout", "findings": [], "total": 0,
                         "by_severity": {}, "target": target}
@@ -1935,8 +2193,8 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             _add_log(db, scan_id, f"[P2] FFUF rapide error: {ffuf_quick['error']}", level="error")
         else:
             _add_log(db, scan_id,
-                     f"[P2] FFUF rapide: {ffuf_quick.get('total', 0)} endpoints â€” "
-                     f"{len([e for e in ffuf_quick.get('endpoints', []) if '?' in e.get('url', '')])} avec paramÃ¨tres")
+                     f"[P2] FFUF rapide: {ffuf_quick.get('total', 0)} endpoints  --  "
+                     f"{len([e for e in ffuf_quick.get('endpoints', []) if '?' in e.get('url', '')])} avec parametres")
 
         # Log Dalfox (Phase 2)
         if dalfox_result.get("error"):
@@ -1946,11 +2204,11 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             xss_sev   = dalfox_result.get("by_severity", {})
             if xss_total > 0:
                 _add_log(db, scan_id,
-                         f"[P2] Dalfox XSS: {xss_total} findings â€” "
+                         f"[P2] Dalfox XSS: {xss_total} findings  --  "
                          f"high={xss_sev.get('high', 0)} medium={xss_sev.get('medium', 0)}",
                          level="error" if xss_sev.get("high", 0) > 0 else "warning")
             else:
-                _add_log(db, scan_id, "[P2] Dalfox: aucun XSS dÃ©tectÃ©")
+                _add_log(db, scan_id, "[P2] Dalfox: aucun XSS detecte")
         ctx.save_step_result("dalfox", dalfox_result)
 
         # Log Nuclei
@@ -1962,7 +2220,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             by_sev   = nuclei_result.get("by_severity", {})
             max_cvss = nuclei_result.get("max_cvss")
             _add_log(db, scan_id,
-                     f"[P2] Nuclei: {total_n} findings â€” "
+                     f"[P2] Nuclei: {total_n} findings  --  "
                      f"critical={by_sev.get('critical', 0)} "
                      f"high={by_sev.get('high', 0)} "
                      f"medium={by_sev.get('medium', 0)}"
@@ -1975,7 +2233,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                     cves = ", ".join(f.get("cve_ids", [])) or "n/a"
                     cvss = f.get("cvss_score")
                     _add_log(db, scan_id,
-                             f"  [{sev.upper()}] {f.get('name')} â€” CVE: {cves}"
+                             f"  [{sev.upper()}] {f.get('name')}  --  CVE: {cves}"
                              + (f" | CVSS: {cvss}" if cvss else "")
                              + f" @ {f.get('matched_at')}",
                              level="error" if sev == "critical" else "warning")
@@ -1983,23 +2241,23 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         _update_scan(db, scan, nuclei_data=nuclei_result, progress=45)
 
         _update_scan(db, scan, progress=55)
-        _publish(r, scan_id, "running", 55, "Phase 2/5 â€” Active Scan complete âœ”")
-        _add_log(db, scan_id, "Phase 2/5 complete âœ”")
+        _publish(r, scan_id, "running", 55, "Phase 2/5  --  Active Scan complete [OK]")
+        _add_log(db, scan_id, "Phase 2/5 complete [OK]")
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # PHASE 3 â€” EXPLOITATION  (55 â†’ 75%)
-        # Step 3a (parallel): FFUF âˆ¥ GitLeaks âˆ¥ Katana (30s max, non-bloquant)
-        # Step 3b (conditional): SQLMap â€” only if ZAP/FFUF/Katana detected injectable params
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
+        # PHASE 3  --  EXPLOITATION  (55 -> 75%)
+        # Step 3a (parallel): FFUF || GitLeaks || Katana (30s max, non-bloquant)
+        # Step 3b (conditional): SQLMap  --  only if ZAP/FFUF/Katana detected injectable params
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
         _update_scan(db, scan, current_phase="exploitation", progress=57)
         _publish(r, scan_id, "running", 57,
-                 "[Phase 3/5] Exploitation â€” FFUF âˆ¥ GitLeaks âˆ¥ Katana + SQLMap (conditionnel)...")
+                 "[Phase 3/5] Exploitation  --  FFUF || GitLeaks || Katana + SQLMap (conditionnel)...")
         _add_log(db, scan_id,
-                 "â•â•â• Phase 3/5: Exploitation (FFUF âˆ¥ GitLeaks âˆ¥ Katana + SQLMap conditionnel) â•â•â•")
+                 "a*a*a* Phase 3/5: Exploitation (FFUF || GitLeaks || Katana + SQLMap conditionnel) a*a*a*")
 
-        # â”€â”€ Katana wrapper: timeout DUR de 90s, ne bloque JAMAIS SQLMap â”€â”€â”€â”€â”€â”€
-        # 90s = le temps de rÃ©ellement crawler une SPA (JS/API endpoints) tout en
-        # restant bornÃ©. En cas de timeout/erreur â†’ stub vide, la Phase 3 continue.
+        # a"EURa"EUR Katana wrapper: timeout DUR de 90s, ne bloque JAMAIS SQLMap a"EURa"EURa"EURa"EURa"EURa"EUR
+        # 90s = le temps de reellement crawler une SPA (JS/API endpoints) tout en
+        # restant borne. En cas de timeout/erreur -> stub vide, la Phase 3 continue.
         async def _safe_katana() -> Dict[str, Any]:
             stub: Dict[str, Any] = {
                 "target": target, "skipped": False, "timed_out": False,
@@ -2011,113 +2269,109 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             except asyncio.TimeoutError:
                 stub["timed_out"] = True
                 stub["skipped"]   = True
-                stub["error"]     = "Katana timed out (15s) â€” Phase 3 continues without Katana"
+                stub["error"]     = "Katana timed out (15s)  --  Phase 3 continues without Katana"
                 return stub
             except Exception as exc:
                 stub["skipped"] = True
                 stub["error"]   = str(exc)
                 return stub
 
-        # â”€â”€ Step 3a: ZAP â†’ FFUF â†’ wait â†’ GitLeaks â†’ Katana â†’ lab â†’ Nikto â†’ Wapiti â”€
-        # ZAP passe EN PREMIER sur cible saine ; FFUF aprÃ¨s (Ã©vite que ZAP
-        # hÃ©rite d'une cible Ã©puisÃ©e). Pause 30s aprÃ¨s FFUF pour laisser
-        # la cible (ex: Juice Shop) rÃ©cupÃ©rer avant Katana/Nikto/Wapiti.
+        # a"EURa"EUR Step 3a: ZAP -> FFUF -> wait -> GitLeaks -> Katana -> lab -> Nikto -> Wapiti a"EUR
+        # ZAP passe EN PREMIER sur cible saine ; FFUF apres (evite que ZAP
+        # herite d'une cible epuisee). Pause 30s apres FFUF pour laisser
+        # la cible (ex: Juice Shop) recuperer avant Katana/Nikto/Wapiti.
+        # Fix 2: Phase 3 Groupe A PARALLELE -- ZAP || FFUF || GitLeaks || Katana || Lab || Nikto || Wapiti
+        # Tous independants entre eux -- aucun ne depend des resultats des autres.
         async def _do_phase3a():
             await _wait_for_target(target)
-            # 1. ZAP en premier â€” cible saine, Ajax Spider si SPA dÃ©tectÃ©e
+
+            _zap_skip    = {"target": target, "skipped": True, "alerts": [], "total": 0, "by_risk": {},
+                            "endpoints": [], "form_params": [], "abnormal_headers": [], "implicit_ports": [],
+                            "error": None, "reason": agent_decision["reasons"].get("zap", "skipped")}
+            _ffuf_skip   = {"target": target, "skipped": True, "endpoints": [], "total": 0,
+                            "by_status": {}, "by_category": {}, "by_severity": {}, "error": None,
+                            "reason": agent_decision["reasons"].get("ffuf", "skipped")}
+            _gl_skip     = {"target": target, "skipped": True, "findings": [], "total": 0,
+                            "by_severity": {}, "error": None,
+                            "reason": agent_decision["reasons"].get("gitleaks", "skipped")}
+            _kat_skip    = {"target": target, "skipped": True, "api_endpoints": [], "endpoints": [],
+                            "js_files": [], "params": [], "urls_with_params": [], "total": 0,
+                            "error": None, "reason": agent_decision["reasons"].get("katana", "skipped")}
+            _lab_skip    = {"target": target, "detected": False, "skipped": True,
+                            "reason": "lab_mode_disabled", "challenges": [], "total": 0, "error": None}
+            _nikto_skip  = {"target": target, "skipped": True, "findings": [], "total": 0,
+                            "by_severity": {}, "error": None,
+                            "reason": agent_decision["reasons"].get("nikto", "skipped")}
+            _wapiti_skip = {"target": target, "skipped": True, "findings": [], "total": 0,
+                            "by_severity": {}, "error": None,
+                            "reason": agent_decision["reasons"].get("wapiti", "skipped")}
+
+            # Etape 1: gather LEGER -- GitLeaks + Lab (peu de requetes HTTP, pas de saturation)
+            async def _p3_gitleaks():
+                if "gitleaks" not in tools_to_run:
+                    return _gl_skip
+                return await _call_gitleaks(target, timeout=120)
+
+            async def _p3_lab():
+                if not lab_mode:
+                    logger.info("[P3] Lab Challenge API: DESACTIVE (lab_mode=false)")
+                    return _lab_skip
+                logger.info("[P3] Lab Challenge API: ACTIVE (lab_mode=true)")
+                return await _call_lab_challenges(target, timeout=20)
+
+            _r3_light = await asyncio.gather(
+                _p3_gitleaks(), _p3_lab(),
+                return_exceptions=True,
+            )
+            _gl  = _r3_light[0] if not isinstance(_r3_light[0], Exception) else {**_gl_skip,  "error": str(_r3_light[0])}
+            _lab = _r3_light[1] if not isinstance(_r3_light[1], Exception) else {**_lab_skip, "error": str(_r3_light[1])}
+
+            # Etape 2: sequentiel LOURD -- ZAP -> FFUF -> Katana -> Nikto -> Wapiti
+            # (outils HTTP intensifs : sequentiel pour ne pas saturer la cible)
+            await _wait_for_target(target)
             if "zap" in tools_to_run:
                 _zap = await _call_zap(
                     target, auth_headers=_auth_h, auth_cookies=_auth_c,
                     ajax_spider=agent_decision.get("zap_ajax", False),
                 )
-                await asyncio.sleep(8)
             else:
-                _zap = {
-                    "target": target, "skipped": True, "alerts": [], "total": 0,
-                    "by_risk": {}, "endpoints": [], "form_params": [],
-                    "abnormal_headers": [], "implicit_ports": [], "error": None,
-                    "reason": agent_decision["reasons"].get("zap", "skipped by agent decision"),
-                }
-            # 2. FFUF complet (peut Ã©puiser la cible â†’ pause de rÃ©cupÃ©ration aprÃ¨s)
+                _zap = _zap_skip
+
             await _wait_for_target(target)
             if "ffuf" in tools_to_run:
-                _ffuf = await _call_ffuf(target, timeout=90, wordlist="fallback", auth_headers=_auth_h, auth_cookies=_auth_c)
-                # Pause longue pour laisser la cible rÃ©cupÃ©rer aprÃ¨s FFUF
-                await asyncio.sleep(30)
+                _ffuf = await _call_ffuf(
+                    target, timeout=90, wordlist="fallback",
+                    auth_headers=_auth_h, auth_cookies=_auth_c,
+                )
             else:
-                _ffuf = {
-                    "target": target, "skipped": True, "endpoints": [], "total": 0,
-                    "by_status": {}, "by_category": {}, "by_severity": {}, "error": None,
-                    "reason": agent_decision["reasons"].get("ffuf", "skipped by agent decision"),
-                }
-            # 3. GitLeaks
-            if "gitleaks" in tools_to_run:
-                _gitleaks = await _call_gitleaks(target, timeout=120)
-            else:
-                _gitleaks = {
-                    "target": target, "skipped": True, "findings": [], "total": 0,
-                    "by_severity": {}, "error": None,
-                    "reason": agent_decision["reasons"].get("gitleaks", "skipped by agent decision"),
-                }
-            # 4. Katana (aprÃ¨s pause rÃ©cupÃ©ration â€” cible stable)
-            await _wait_for_target(target, max_retries=4)
+                _ffuf = _ffuf_skip
+
             if "katana" in tools_to_run:
-                _katana = await _safe_katana()
+                _kat = await _safe_katana()
             else:
-                _katana = {
-                    "target": target, "skipped": True, "api_endpoints": [], "endpoints": [],
-                    "js_files": [], "params": [], "urls_with_params": [], "total": 0, "error": None,
-                    "reason": agent_decision["reasons"].get("katana", "skipped by agent decision"),
-                }
-            # 5. Lab challenges (conditionnel : lab_mode=True uniquement)
-            if lab_mode:
-                logger.info("[P3] Lab Challenge API: ACTIVÃ‰ (lab_mode=true)")
-                _lab = await _call_lab_challenges(target, timeout=20)
-            else:
-                logger.info("[P3] Lab Challenge API: DÃ‰SACTIVÃ‰ (lab_mode=false â€” dÃ©tection active uniquement)")
-                _lab = {
-                    "target":   target,
-                    "detected": False,
-                    "skipped":  True,
-                    "reason":   "lab_mode_disabled",
-                    "challenges": [],
-                    "total":    0,
-                    "error":    None,
-                }
-            # 6. Nikto
+                _kat = _kat_skip
+
+            await _wait_for_target(target)
             if "nikto" in tools_to_run:
-                _nikto = await _call_nikto(
-                    target, timeout=130,
-                    auth_headers=_auth_h, auth_cookies=_auth_c,
-                )
+                _nikto = await _call_nikto(target, timeout=130, auth_headers=_auth_h, auth_cookies=_auth_c)
             else:
-                _nikto = {
-                    "target": target, "skipped": True, "findings": [], "total": 0,
-                    "by_severity": {}, "error": None,
-                    "reason": agent_decision["reasons"].get("nikto", "skipped by agent decision"),
-                }
-            # 7. Wapiti
+                _nikto = _nikto_skip
+
             if "wapiti" in tools_to_run:
-                _wapiti = await _call_wapiti(
-                    target, timeout=130,
-                    auth_headers=_auth_h, auth_cookies=_auth_c,
-                )
+                _wapiti = await _call_wapiti(target, timeout=130, auth_headers=_auth_h, auth_cookies=_auth_c)
             else:
-                _wapiti = {
-                    "target": target, "skipped": True, "findings": [], "total": 0,
-                    "by_severity": {}, "error": None,
-                    "reason": agent_decision["reasons"].get("wapiti", "skipped by agent decision"),
-                }
-            return _ffuf, _zap, _gitleaks, _katana, _lab, _nikto, _wapiti
+                _wapiti = _wapiti_skip
+
+            return _ffuf, _zap, _gl, _kat, _lab, _nikto, _wapiti
 
         try:
             ffuf_result, zap_result, gitleaks_result, katana_result, lab_challenges_result, nikto_result, wapiti_result = loop.run_until_complete(
                 asyncio.wait_for(_do_phase3a(), timeout=_PHASE3_MAX_SECONDS)
             )
         except asyncio.TimeoutError:
-            logger.error("[P3] TIMEOUT GLOBAL %ds â€” phase interrompue, rÃ©sultats partiels conservÃ©s", _PHASE3_MAX_SECONDS)
+            logger.error("[P3] TIMEOUT GLOBAL %ds  --  phase interrompue, resultats partiels conserves", _PHASE3_MAX_SECONDS)
             _add_log(db, scan_id,
-                     f"[P3] TIMEOUT GLOBAL {_PHASE3_MAX_SECONDS}s â€” exploitation interrompue, scan continue avec rÃ©sultats partiels",
+                     f"[P3] TIMEOUT GLOBAL {_PHASE3_MAX_SECONDS}s  --  exploitation interrompue, scan continue avec resultats partiels",
                      level="error")
             _p3_skip = {"skipped": True, "error": "phase3_timeout", "findings": [], "total": 0,
                         "by_severity": {}, "target": target}
@@ -2139,7 +2393,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             endpoints_cnt  = len(zap_result.get("endpoints", []))
             implicit_ports = zap_result.get("implicit_ports", [])
             _add_log(db, scan_id,
-                     f"[P3] ZAP: {total_z} alerts â€” high={by_risk.get('High', 0)} "
+                     f"[P3] ZAP: {total_z} alerts  --  high={by_risk.get('High', 0)} "
                      f"medium={by_risk.get('Medium', 0)} | "
                      f"{endpoints_cnt} endpoints, {len(implicit_ports)} implicit ports",
                      level=("error"   if by_risk.get("High",   0) > 0 else
@@ -2147,11 +2401,11 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             for a in zap_result.get("alerts", []):
                 if a.get("risk_code", 0) >= 3:
                     _add_log(db, scan_id,
-                             f"  [HIGH] {a.get('name')} â€” CWE-{a.get('cwe_id', '?')} "
+                             f"  [HIGH] {a.get('name')}  --  CWE-{a.get('cwe_id', '?')} "
                              f"({a.get('count', 0)} instance(s))", level="error")
             for h in zap_result.get("abnormal_headers", []):
                 _add_log(db, scan_id,
-                         f"  [HEADER] {h.get('header_issue')} â€” risk: {h.get('risk')}",
+                         f"  [HEADER] {h.get('header_issue')}  --  risk: {h.get('risk')}",
                          level="warning")
         ctx.save_step_result("zap", zap_result)
         _update_scan(db, scan, zap_data=zap_result, progress=62)
@@ -2159,12 +2413,12 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         # Log Katana
         if katana_result.get("timed_out"):
             _add_log(db, scan_id,
-                     "[P3] Katana: TIMEOUT 15s â€” Phase 3 continue sans Katana", level="warning")
+                     "[P3] Katana: TIMEOUT 15s  --  Phase 3 continue sans Katana", level="warning")
         elif katana_result.get("error"):
             _add_log(db, scan_id, f"[P3] Katana error: {katana_result['error']}", level="warning")
         else:
             _add_log(db, scan_id,
-                     f"[P3] Katana: {katana_result.get('total', 0)} endpoints crawlÃ©s"
+                     f"[P3] Katana: {katana_result.get('total', 0)} endpoints crawles"
                      + (f" | {len(katana_result.get('api_endpoints', []))} API endpoints"
                         if katana_result.get('api_endpoints') else ""))
         ctx.save_step_result("katana", katana_result)
@@ -2173,7 +2427,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         if lab_challenges_result.get("detected"):
             _add_log(db, scan_id,
                      f"[P3] Lab challenges: {lab_challenges_result.get('total', 0)} challenge(s) "
-                     f"dÃ©tectÃ©s via {lab_challenges_result.get('platform')}",
+                     f"detectes via {lab_challenges_result.get('platform')}",
                      level="warning")
             for ch in lab_challenges_result.get("challenges", [])[:10]:
                 _add_log(db, scan_id,
@@ -2225,7 +2479,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         # Log Nikto
         if nikto_result.get("skipped"):
             _add_log(db, scan_id,
-                     f"[P3] Nikto: SKIPPED â€” {nikto_result.get('reason', 'agent decision')}")
+                     f"[P3] Nikto: SKIPPED  --  {nikto_result.get('reason', 'agent decision')}")
         elif nikto_result.get("error"):
             _add_log(db, scan_id, f"[P3] Nikto error: {nikto_result['error']}", level="error")
         else:
@@ -2242,7 +2496,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         # Log Wapiti
         if wapiti_result.get("skipped"):
             _add_log(db, scan_id,
-                     f"[P3] Wapiti: SKIPPED â€” {wapiti_result.get('reason', 'agent decision')}")
+                     f"[P3] Wapiti: SKIPPED  --  {wapiti_result.get('reason', 'agent decision')}")
         elif wapiti_result.get("error"):
             _add_log(db, scan_id, f"[P3] Wapiti error: {wapiti_result['error']}", level="error")
         else:
@@ -2256,7 +2510,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                             "warning" if _wapiti_sev.get("high",     0) > 0 else "info"))
         ctx.save_step_result("wapiti", wapiti_result)
 
-        # â”€â”€ Step 3b: SQLMap â€” conditionnel (params GET/POST dÃ©tectÃ©s ZAP + FFUF + Katana) â”€
+        # a"EURa"EUR Step 3b: SQLMap  --  conditionnel (params GET/POST detectes ZAP + FFUF + Katana) a"EUR
         from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
 
         # Endpoints ZAP avec query string (GET) ou form params (POST)
@@ -2266,29 +2520,29 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         ]
         zap_form_params = zap_result.get("form_params", [])
 
-        # Endpoints FFUF porteurs de paramÃ¨tres GET (?x=y)
+        # Endpoints FFUF porteurs de parametres GET (?x=y)
         ffuf_get_param_eps = [
             ep.get("url", "") for ep in ffuf_result.get("endpoints", [])[:80]
             if ep.get("url") and _parse_qs(_urlparse(ep.get("url", "")).query)
         ]
         
-        # Endpoints Katana avec paramÃ¨tres (suite Ã  la modif de main.py de Katana)
+        # Endpoints Katana avec parametres (suite a la modif de main.py de Katana)
         katana_param_eps = katana_result.get("urls_with_params", [])
 
-        # DÃ©clenchement si ZAP, FFUF OU Katana a dÃ©tectÃ© des paramÃ¨tres injectables.
+        # Declenchement si ZAP, FFUF OU Katana a detecte des parametres injectables.
         has_injectable_params = bool(
             zap_form_params or zap_get_param_eps or ffuf_get_param_eps or katana_param_eps
         )
 
-        # â”€â”€ Fallback paramÃ©trÃ© : si aucun param dÃ©tectÃ© (SPA, app PHP sans crawler),
-        # on sonde des endpoints GET paramÃ©trÃ©s connus et on les injecte dans FFUF
+        # a"EURa"EUR Fallback parametre : si aucun param detecte (SPA, app PHP sans crawler),
+        # on sonde des endpoints GET parametres connus et on les injecte dans FFUF
         # pour que _call_sqlmap_enriched les teste.
         if not has_injectable_params:
             _base_url = target if target.startswith(("http://", "https://")) else f"http://{target}"
             _base_url  = _base_url.rstrip("/")
-            # Attendre que la cible rÃ©cupÃ¨re aprÃ¨s Nikto/Wapiti (scans lourds)
+            # Attendre que la cible recupere apres Nikto/Wapiti (scans lourds)
             loop.run_until_complete(_wait_for_target(target, max_retries=4))
-            # Sonde les endpoints paramÃ©trÃ©s connus (Juice Shop, DVWA, BWAPP, apps gÃ©nÃ©riques).
+            # Sonde les endpoints parametres connus (Juice Shop, DVWA, BWAPP, apps generiques).
             _param_probes = [
                 (f"{_base_url}/rest/products/search",         "?q=test",       "Juice-Shop-REST"),
                 (f"{_base_url}/api/Products",                 "?q=test",       "Juice-Shop-Products"),
@@ -2312,71 +2566,149 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 )
                 has_injectable_params = True
                 _add_log(db, scan_id,
-                         f"[P3] SQLMap fallback probe {_label} (HTTP {_sc}) â€” endpoint found, SQLMap triggered",
+                         f"[P3] SQLMap fallback probe {_label} (HTTP {_sc})  --  endpoint found, SQLMap triggered",
                          level="info")
 
         has_injectable_params = True  # FIX G: auth-bypass probe always provides /rest/user/login
-        if has_injectable_params and "sqlmap" in tools_to_run:
-            loop.run_until_complete(_wait_for_target(target))
+
+        # Fix 2 Groupe B: SQLMap + IDOR en parallele (les deux dependent des resultats Groupe A)
+        # Collect IDOR endpoints first (synchronous, fast) before launching parallel group
+        _idor_eps_pre: List[str] = []
+        for _ep in ffuf_result.get("endpoints", []):
+            _u = _ep.get("url", "") if isinstance(_ep, dict) else str(_ep)
+            if _u:
+                _idor_eps_pre.append(_u)
+        for _ep in katana_result.get("api_endpoints", []):
+            _u = _ep.get("url", "") if isinstance(_ep, dict) else str(_ep)
+            if _u:
+                _idor_eps_pre.append(_u)
+        for _ep in katana_result.get("endpoints", []):
+            _u = _ep.get("url", "") if isinstance(_ep, dict) else str(_ep)
+            if _u:
+                _idor_eps_pre.append(_u)
+        _seen_pre: set = set()
+        _idor_eps_dedup: List[str] = []
+        for _u in _idor_eps_pre:
+            if _u not in _seen_pre:
+                _seen_pre.add(_u)
+                _idor_eps_dedup.append(_u)
+
+        _sqlmap_skip_agent = {
+            "target": target, "skipped": True,
+            "reason": agent_decision["reasons"].get("sqlmap", "skipped by agent decision"),
+            "vulnerable": False, "findings": [], "total": 0,
+        }
+        _sqlmap_skip_noparams = {
+            "target": target, "skipped": True,
+            "reason": "No injectable GET/POST params detected -- SQLMap skipped (FP reduction)",
+            "vulnerable": False, "findings": [], "total": 0,
+        }
+        _idor_skip_default: Dict[str, Any] = {
+            "target": target, "skipped": True, "reason": "no_auth",
+            "findings": [], "total": 0, "by_severity": {},
+            "user_b_email": None, "user_b_id": None, "candidates_tested": 0, "error": None,
+        }
+
+        if "sqlmap" in tools_to_run:
             _add_log(db, scan_id,
-                     f"[P3] SQLMap: params dÃ©tectÃ©s â€” "
-                     f"ZAP: {len(zap_get_param_eps)} endpoints GET, "
+                     f"[P3] SQLMap+IDOR parallel -- ZAP: {len(zap_get_param_eps)} GET eps, "
                      f"{len(zap_form_params)} form params | "
-                     f"FFUF/Katana: {len(ffuf_get_param_eps) + len(katana_param_eps)} endpoints avec params. "
-                     f"Lancement (auth={'oui' if (_auth_h or _auth_c) else 'non'})...")
-            sqlmap_result = loop.run_until_complete(
-                _call_sqlmap_enriched(target, zap_result, ffuf_result, katana_result,
-                                      timeout=300, auth_headers=_auth_h, auth_cookies=_auth_c)
-            )
-            if sqlmap_result.get("error"):
-                _add_log(db, scan_id, f"[P3] SQLMap error: {sqlmap_result['error']}", level="error")
-            else:
-                vulnerable     = sqlmap_result.get("vulnerable", False)
-                sqli_total     = sqlmap_result.get("total", 0)
-                targets_tested = sqlmap_result.get("targets_tested", 0)
-                _add_log(db, scan_id,
-                         f"[P3] SQLMap: tested {targets_tested} targets â€” "
-                         + ("VULNERABLE â€” " + str(sqli_total) + " injection(s) found"
-                            if vulnerable else "No SQL injection detected"),
-                         level="error" if vulnerable else "info")
-                for f in sqlmap_result.get("findings", [])[:3]:
-                    _add_log(db, scan_id,
-                             f"  [SQLI] Param: {f.get('parameter')} | "
-                             f"{f.get('technique')} | {f.get('target_url', '')[:60]}",
-                             level="error")
-        elif "sqlmap" not in tools_to_run:
-            sqlmap_result = {
-                "target":     target,
-                "skipped":    True,
-                "reason":     agent_decision["reasons"].get("sqlmap", "skipped by agent decision"),
-                "vulnerable": False,
-                "findings":   [],
-                "total":      0,
-            }
+                     f"FFUF/Katana: {len(ffuf_get_param_eps) + len(katana_param_eps)} eps avec params. "
+                     f"auth={'oui' if (_auth_h or _auth_c) else 'non'}")
+        if auth_ctx.has_auth():
+            _add_log(db, scan_id, "[P3] IDOR: lancement du test cross-compte (parallel avec SQLMap)...")
+
+        async def _do_phase3b():
+            async def _p3b_sqlmap():
+                if "sqlmap" not in tools_to_run:
+                    return _sqlmap_skip_agent
+                await _wait_for_target(target)
+                return await _call_sqlmap_enriched(
+                    target, zap_result, ffuf_result, katana_result,
+                    timeout=300, auth_headers=_auth_h, auth_cookies=_auth_c,
+                    probe_pack_ids=agent_decision.get("probe_pack_ids") or ["generic_rest_api"],
+                )
+
+            async def _p3b_idor():
+                if not auth_ctx.has_auth():
+                    return _idor_skip_default
+                try:
+                    return await asyncio.wait_for(
+                        _call_idor(
+                            target,
+                            endpoints=_idor_eps_dedup[:40],
+                            timeout=90,
+                            auth_headers=_auth_h or None,
+                            auth_cookies=_auth_c or None,
+                        ),
+                        timeout=120,
+                    )
+                except asyncio.TimeoutError:
+                    return {**_idor_skip_default, "skipped": True, "reason": "idor_timeout",
+                            "error": "IDOR test timed out"}
+                except Exception as _ex:
+                    return {**_idor_skip_default, "skipped": True, "error": str(_ex)}
+
+            # Sequentiel : SQLMap d'abord, puis IDOR -- evite contention HTTP sur memes endpoints
+            try:
+                _sql = await _p3b_sqlmap()
+            except Exception as _e_sql:
+                _sql = {**_sqlmap_skip_agent, "error": str(_e_sql)}
+            try:
+                _idr = await _p3b_idor()
+            except Exception as _e_idr:
+                _idr = {**_idor_skip_default, "error": str(_e_idr)}
+            return _sql, _idr
+
+        sqlmap_result, idor_result = loop.run_until_complete(
+            asyncio.wait_for(_do_phase3b(), timeout=380)
+        )
+
+        # Log SQLMap
+        if sqlmap_result.get("skipped"):
             _add_log(db, scan_id,
-                     f"[P3] SQLMap: SKIPPED by agent â€” "
-                     f"{agent_decision['reasons'].get('sqlmap', 'agent decision')}",
+                     f"[P3] SQLMap: SKIPPED -- {sqlmap_result.get('reason', 'agent decision')}",
                      level="info")
+        elif sqlmap_result.get("error"):
+            _add_log(db, scan_id, f"[P3] SQLMap error: {sqlmap_result['error']}", level="error")
         else:
-            sqlmap_result = {
-                "target":     target,
-                "skipped":    True,
-                "reason":     "No injectable GET/POST params detected by ZAP, FFUF, or Katana â€” SQLMap skipped (FP reduction)",
-                "vulnerable": False,
-                "findings":   [],
-                "total":      0,
-            }
+            vulnerable     = sqlmap_result.get("vulnerable", False)
+            sqli_total     = sqlmap_result.get("total", 0)
+            targets_tested = sqlmap_result.get("targets_tested", 0)
             _add_log(db, scan_id,
-                     "[P3] SQLMap: SKIPPED â€” aucun paramÃ¨tre injectable (GET/POST) "
-                     "dÃ©tectÃ© par ZAP, FFUF ni Katana (rÃ©duction FP)",
+                     f"[P3] SQLMap: tested {targets_tested} targets  --  "
+                     + ("VULNERABLE  --  " + str(sqli_total) + " injection(s) found"
+                        if vulnerable else "No SQL injection detected"),
+                     level="error" if vulnerable else "info")
+            for f in sqlmap_result.get("findings", [])[:3]:
+                _add_log(db, scan_id,
+                         f"  [SQLI] Param: {f.get('parameter')} | "
+                         f"{f.get('technique')} | {f.get('target_url', '')[:60]}",
+                         level="error")
+
+        # Log IDOR
+        idor_total = idor_result.get("total", 0)
+        if idor_result.get("skipped"):
+            _add_log(db, scan_id,
+                     f"[P3] IDOR: skipped -- {idor_result.get('reason', 'unknown')}",
+                     level="info")
+        elif idor_total > 0:
+            _add_log(db, scan_id,
+                     f"[P3] IDOR: {idor_total} vulnerability(ies) confirmed -- "
+                     f"cross-account data leak detected",
+                     level="warning")
+        else:
+            _add_log(db, scan_id,
+                     f"[P3] IDOR: {idor_result.get('candidates_tested', 0)} URL(s) tested -- "
+                     f"no cross-account access confirmed",
                      level="info")
 
-        ctx.save_step_result("sqlmap", sqlmap_result)
-        _update_scan(db, scan, sqlmap_data=sqlmap_result, progress=75)
-        _publish(r, scan_id, "running", 75, "Phase 3/5 â€” Exploitation complete âœ”")
-        _add_log(db, scan_id, "Phase 3/5 complete âœ”")
+        ctx.save_step_result("idor", idor_result)
+        _update_scan(db, scan, progress=75)
+        _publish(r, scan_id, "running", 75, "Phase 3/5  --  Exploitation complete [OK]")
+        _add_log(db, scan_id, "Phase 3/5 complete [OK]")
 
-        # â”€â”€ DÃ©tection cible indisponible â€” si tous les outils actifs P2+P3 ont Ã©chouÃ©
+        # a"EURa"EUR Detection cible indisponible  --  si tous les outils actifs P2+P3 ont echoue
         _p23_results = {
             n: r for n, r in [
                 ("ffuf",     ffuf_result),
@@ -2393,11 +2725,11 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         )
         if _all_tools_failed:
             _unavail_msg = (
-                "[SCAN] Cible non disponible pendant le scan â€” rÃ©sultats incomplets. "
-                f"Tous les outils actifs ont Ã©chouÃ© : {list(_p23_results.keys())}"
+                "[SCAN] Cible non disponible pendant le scan  --  resultats incomplets. "
+                f"Tous les outils actifs ont echoue : {list(_p23_results.keys())}"
             )
             logger.warning(
-                "âš  ALL active tools failed for %s â€” target likely overloaded or down. "
+                " ALL active tools failed for %s  --  target likely overloaded or down. "
                 "Tools: %s | Errors: %s",
                 target,
                 list(_p23_results.keys()),
@@ -2406,18 +2738,18 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             _add_log(db, scan_id, _unavail_msg, level="warning")
             _update_scan(db, scan, error_message=_unavail_msg)
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # PHASE 4 â€” CORRELATION ENGINE  (75 â†’ 90%)
-        # Sequential: Correlator â†’ FP Reduction â†’ Risk Scoring
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
+        # PHASE 4  --  CORRELATION ENGINE  (75 -> 90%)
+        # Sequential: Correlator -> FP Reduction -> Risk Scoring
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
         _update_scan(db, scan, current_phase="correlation", progress=77)
         _publish(r, scan_id, "running", 77,
-                 "[Phase 4/5] Correlation â€” dedup + FP reduction + risk scoring...")
+                 "[Phase 4/5] Correlation  --  dedup + FP reduction + risk scoring...")
         _add_log(db, scan_id,
-                 "â•â•â• Phase 4/5: Correlation Engine (dedup + FP reduction + risk scoring) â•â•â•")
+                 "a*a*a* Phase 4/5: Correlation Engine (dedup + FP reduction + risk scoring) a*a*a*")
 
-        # â”€â”€ 4a: Correlation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        _add_log(db, scan_id, "[P4] CorrÃ©lation de tous les findings des phases 1-3...")
+        # a"EURa"EUR 4a: Correlation a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
+        _add_log(db, scan_id, "[P4] Correlation de tous les findings des phases 1-3...")
         correlation_report: Dict[str, Any] = {}
         try:
             dalfox_findings = dalfox_result.get("findings", [])
@@ -2450,13 +2782,14 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 nikto_data   = nikto_result,
                 wapiti_data  = wapiti_result,
                 sqlmap_data  = sqlmap_result,
+                idor_data    = idor_result,
             )
             summary_str = correlation_report.get("summary", "")
             _add_log(db, scan_id, f"[P4] Correlation: {summary_str}")
 
             svm = correlation_report.get("service_vuln_map", {})
             if svm:
-                _add_log(db, scan_id, f"  Serviceâ†’CVE map: {len(svm)} service(s) avec CVEs connus")
+                _add_log(db, scan_id, f"  Service->CVE map: {len(svm)} service(s) avec CVEs connus")
             for ap in correlation_report.get("attack_paths", [])[:5]:
                 _add_log(db, scan_id, f"  [PATH] {ap}", level="warning")
 
@@ -2468,7 +2801,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         ctx.save_step_result("correlation", correlation_report)
         _update_scan(db, scan, correlated_data=correlation_report, progress=80)
 
-        # â”€â”€ 4b: FP Reduction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # a"EURa"EUR 4b: FP Reduction a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
         _add_log(db, scan_id, "[P4] Classification FP (confirmed / suspicious / informational)...")
         fp_report: Dict[str, Any] = {}
         try:
@@ -2535,7 +2868,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                      f"| merged={fp_report.get('merged_total', 0)}")
             for f in fp_report.get("suspicious", [])[:3]:
                 _add_log(db, scan_id,
-                         f"  [SUSPICIOUS] {f.get('title', '?')} â€” flags: {f.get('fp_flags', [])}",
+                         f"  [SUSPICIOUS] {f.get('title', '?')}  --  flags: {f.get('fp_flags', [])}",
                          level="warning")
 
         except Exception as exc:
@@ -2546,15 +2879,15 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         ctx.save_step_result("fp_reduction", fp_report)
         _update_scan(db, scan, correlated_data=correlation_report, progress=84)
 
-        # â”€â”€ 4c: Risk Scoring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # a"EURa"EUR 4c: Risk Scoring a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
         _add_log(db, scan_id, "[P4] Calcul du risk score multi-facteurs...")
         risk_report = compute_enhanced_risk_score(ctx, correlation_report)
         risk_score  = risk_report["final_score"]
 
-        # â”€â”€ Fix 6: score minimum garanti â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # Plancher de score selon la sÃ©vÃ©ritÃ© corrÃ©lÃ©e et le nombre de CVE Shodan
-        # connues. Garantit qu'une cible avec des findings rÃ©els n'est jamais
-        # sous-Ã©valuÃ©e. GÃ©nÃ©rique â€” aucune cible en dur.
+        # a"EURa"EUR Fix 6: score minimum garanti a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
+        # Plancher de score selon la severite correlee et le nombre de CVE Shodan
+        # connues. Garantit qu'une cible avec des findings reels n'est jamais
+        # sous-evaluee. Generique  --  aucune cible en dur.
         _corr_sev    = correlation_report.get("by_severity", {})
         _shodan_cves = len(
             shodan_result.get("data", {}).get("internetdb", {}).get("vulns", [])
@@ -2573,7 +2906,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
 
         if _min_score > risk_score:
             _add_log(db, scan_id,
-                     f"[P4] Score minimum garanti: {risk_score} â†’ {_min_score} "
+                     f"[P4] Score minimum garanti: {risk_score} -> {_min_score} "
                      f"(medium={_corr_sev.get('medium', 0)}, high={_corr_sev.get('high', 0)}, "
                      f"shodan_cves={_shodan_cves})",
                      level="info")
@@ -2595,22 +2928,22 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
 
         _update_scan(db, scan, progress=90)
         _publish(r, scan_id, "running", 90,
-                 f"Phase 4/5 â€” Correlation complete âœ” (risk={risk_score}/100)")
-        _add_log(db, scan_id, "Phase 4/5 complete âœ”")
+                 f"Phase 4/5  --  Correlation complete [OK] (risk={risk_score}/100)")
+        _add_log(db, scan_id, "Phase 4/5 complete [OK]")
 
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # PHASE 5 â€” SOC DASHBOARD  (90 â†’ 100%)
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
+        # PHASE 5  --  SOC DASHBOARD  (90 -> 100%)
         # AI Analysis (optional) + SOC Report final + recommandations
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*
         _update_scan(db, scan, current_phase="soc_dashboard", progress=92)
         _publish(r, scan_id, "running", 92,
-                 "[Phase 5/5] SOC Dashboard â€” top findings + rapport + recommandations...")
+                 "[Phase 5/5] SOC Dashboard  --  top findings + rapport + recommandations...")
         _add_log(db, scan_id,
-                 "â•â•â• Phase 5/5: SOC Dashboard (top findings + rapport + recommandations) â•â•â•")
+                 "a*a*a* Phase 5/5: SOC Dashboard (top findings + rapport + recommandations) a*a*a*")
 
-        # â”€â”€ AI Analysis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # RÃ¨gle : ne jamais retourner N/A si findings > 0 ou risk_score > 0.
-        # Si Gemini est indisponible/dÃ©sactivÃ© â†’ fallback rule-based.
+        # a"EURa"EUR AI Analysis a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
+        # Regle : ne jamais retourner N/A si findings > 0 ou risk_score > 0.
+        # Si Gemini est indisponible/desactive -> fallback rule-based.
         ai_result: Dict[str, Any] = {}
         _gemini_key    = settings.GEMINI_API_KEY
         _anthropic_key = settings.ANTHROPIC_API_KEY
@@ -2618,8 +2951,8 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         _ai_provider   = "gemini" if _gemini_key else "anthropic"
         _total_findings = correlation_report.get("total_findings", 0)
 
-        # SOC report est dÃ©jÃ  construit plus bas, on le passe vide au fallback
-        # s'il n'est pas encore disponible â€” il sera complÃ©tÃ© aprÃ¨s.
+        # SOC report est deja construit plus bas, on le passe vide au fallback
+        # s'il n'est pas encore disponible  --  il sera complete apres.
         _soc_for_fallback: Dict[str, Any] = {}
 
         if settings.AI_ANALYSIS_ENABLED and _ai_key:
@@ -2666,11 +2999,11 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                                     model=settings.AI_MODEL, provider=_ai_provider)
                 )
 
-                # Si l'IA retourne une erreur ou manque risk_level â†’ fallback
+                # Si l'IA retourne une erreur ou manque risk_level -> fallback
                 if raw_ai.get("error") or not raw_ai.get("risk_level"):
                     _reason = raw_ai.get("error", "missing risk_level in AI response")
                     _add_log(db, scan_id,
-                             f"[P5] AI response incomplete ({_reason[:80]}) â€” fallback activÃ©",
+                             f"[P5] AI response incomplete ({_reason[:80]})  --  fallback active",
                              level="warning")
                     ai_result = _build_fallback_ai_analysis(
                         target, risk_score, correlation_report, _soc_for_fallback, reason=_reason
@@ -2680,21 +3013,21 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                     ai_result = raw_ai
                     _add_log(db, scan_id,
                              f"[P5] AI ({_ai_provider}/{ai_result.get('model_used', '?')}): "
-                             f"{ai_result.get('risk_level')} â€” "
+                             f"{ai_result.get('risk_level')}  --  "
                              f"{ai_result.get('executive_summary', '')[:100]}",
                              level="info")
 
             except Exception as exc:
-                _add_log(db, scan_id, f"[P5] AI exception: {exc} â€” fallback activÃ©", level="warning")
+                _add_log(db, scan_id, f"[P5] AI exception: {exc}  --  fallback active", level="warning")
                 ai_result = _build_fallback_ai_analysis(
                     target, risk_score, correlation_report, _soc_for_fallback, reason=str(exc)
                 )
                 ai_result["ai_exception"] = str(exc)
         else:
-            # AI dÃ©sactivÃ© ou pas de clÃ© â€” fallback si findings ou score > 0
+            # AI desactive ou pas de cle  --  fallback si findings ou score > 0
             if _total_findings > 0 or risk_score > 0:
                 _add_log(db, scan_id,
-                         "[P5] AI dÃ©sactivÃ© â†’ gÃ©nÃ©ration analyse rule-based (findings trouvÃ©s)",
+                         "[P5] AI desactive -> generation analyse rule-based (findings trouves)",
                          level="info")
                 ai_result = _build_fallback_ai_analysis(
                     target, risk_score, correlation_report, _soc_for_fallback,
@@ -2702,12 +3035,12 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 )
             else:
                 ai_result = {"enabled": False,
-                             "note": "No findings and AI disabled â€” set GEMINI_API_KEY to activate"}
-                _add_log(db, scan_id, "[P5] AI Analysis: dÃ©sactivÃ©, aucun finding")
+                             "note": "No findings and AI disabled  --  set GEMINI_API_KEY to activate"}
+                _add_log(db, scan_id, "[P5] AI Analysis: desactive, aucun finding")
 
         _update_scan(db, scan, current_phase="soc_output", progress=96)
 
-        # â”€â”€ SOC Report final â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # a"EURa"EUR SOC Report final a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
         soc_report: Dict[str, Any] = {}
         try:
             soc_report = _build_soc_report(target, scan_id, risk_report, correlation_report, ctx, lab_mode=lab_mode)
@@ -2719,13 +3052,13 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                      f"{top_count} top findings | {recs_count} recommandations",
                      level="error" if risk_level in ("CRITICAL", "HIGH") else "info")
             for rec in soc_report.get("recommendations", [])[:3]:
-                _add_log(db, scan_id, f"  â†’ {rec}", level="warning")
+                _add_log(db, scan_id, f"  -> {rec}", level="warning")
         except Exception as exc:
             soc_report = {"error": str(exc)}
             _add_log(db, scan_id, f"[P5] SOC report error: {exc}", level="error")
             logger.exception("SOC report build failed for %s", target)
 
-        # â”€â”€ Persistance finale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # a"EURa"EUR Persistance finale a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
         recon = ReconnaissanceResult(
             id=uuid.uuid4(),
             scan_id=uuid.UUID(scan_id),
@@ -2784,7 +3117,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         )
         _publish(
             r, scan_id, "completed", 100,
-            f"Scan completed â€” Risk: {soc_report.get('risk_level', 'N/A')} ({risk_score}/100)",
+            f"Scan completed  --  Risk: {soc_report.get('risk_level', 'N/A')} ({risk_score}/100)",
             {
                 "risk_score":          risk_score,
                 "risk_level":          soc_report.get("risk_level"),
@@ -2794,8 +3127,8 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             },
         )
         _add_log(db, scan_id,
-                 f"[P5] âœ” Scan completed â€” {soc_report.get('executive_summary', '')}")
-        _add_log(db, scan_id, "Phase 5/5 complete âœ” â€” Pipeline 5 phases terminÃ© avec succÃ¨s")
+                 f"[P5] [OK] Scan completed  --  {soc_report.get('executive_summary', '')}")
+        _add_log(db, scan_id, "Phase 5/5 complete [OK]  --  Pipeline 5 phases termine avec succes")
 
         logger.info(
             "Scan %s completed (risk=%d, level=%s, findings=%d) for %s",
@@ -2806,7 +3139,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         )
         timing_summary = timer.summary()
         plog.info(
-            f"Scan completed â€” risk={risk_score} level={soc_report.get('risk_level')} "
+            f"Scan completed  --  risk={risk_score} level={soc_report.get('risk_level')} "
             f"total_elapsed={timing_summary['total_elapsed']}s "
             f"slowest={timing_summary.get('slowest_phase')}({timing_summary.get('slowest_duration')}s)",
             tool="orchestrator",

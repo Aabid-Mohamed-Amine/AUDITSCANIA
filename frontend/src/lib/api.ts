@@ -84,6 +84,10 @@ export interface TokenResponse {
   token_type: string;
 }
 
+export interface LoginResponse extends TokenResponse {
+  user: User;
+}
+
 // ---------------------------------------------------------------------------
 // Token storage — source of truth for both tokens
 // ---------------------------------------------------------------------------
@@ -228,8 +232,8 @@ apiClient.interceptors.response.use(
 // ---------------------------------------------------------------------------
 
 export const authApi = {
-  login: async (email: string, password: string): Promise<TokenResponse> => {
-    const response = await apiClient.post<TokenResponse>("/auth/login", { email, password });
+  login: async (email: string, password: string): Promise<LoginResponse> => {
+    const response = await apiClient.post<LoginResponse>("/auth/login", { email, password });
     return response.data;
   },
 

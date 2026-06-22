@@ -193,6 +193,7 @@ def correlate(
     nikto_data:   Optional[Dict[str, Any]] = None,
     wapiti_data:  Optional[Dict[str, Any]] = None,
     sqlmap_data:  Optional[Dict[str, Any]] = None,
+    idor_data:    Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Fusionne et corrèle les résultats du pipeline de scan.
@@ -213,6 +214,7 @@ def correlate(
     nikto_data  = nikto_data  or {}
     wapiti_data = wapiti_data or {}
     sqlmap_data = sqlmap_data or {}
+    idor_data   = idor_data   or {}
 
     service_map = _build_nmap_service_map(nmap_data)
     findings: List[Dict[str, Any]] = []
@@ -581,6 +583,37 @@ def correlate(
             "confidence_score":     0.95,
             "attack_path":          f"SQL Injection on {sf.get('parameter', '')} → {sf.get('description', '')}",
             "matched_at":           sf.get("target_url", ""),
+        })
+
+    # ── IDOR / Broken Access Control findings ────────────────────────────────
+    for idx, idf in enumerate(idor_data.get("findings", [])):
+        port = _extract_port_from_url(idf.get("target_url", ""))
+        sev = idf.get("severity", "high")
+        exploit = 95.0 if sev == "critical" else 80.0
+        attack_path = (
+            f"IDOR confirmed: {idf.get('target_url', '')} -- "
+            f"{idf.get('evidence', 'cross-account data access')}"
+        )
+        attack_paths.append(attack_path)
+
+        findings.append({
+            "id":                   f"idor-{idx}",
+            "type":                 "idor",
+            "title":                idf.get("title", "IDOR: Unauthorized cross-account access"),
+            "severity":             sev,
+            "sources":              ["idor_tester"],
+            "affected_service":     "",
+            "affected_port":        port,
+            "cve_ids":              [],
+            "cwe_ids":              idf.get("cwe_ids", ["CWE-639", "CWE-284"]),
+            "cvss_score":           None,
+            "epss_score":           None,
+            "tags":                 ["idor", "broken_access_control", "authorization"],
+            "exploitability_score": exploit,
+            "confidence_score":     0.95,
+            "attack_path":          attack_path,
+            "matched_at":           idf.get("target_url", ""),
+            "evidence":             idf.get("evidence", ""),
         })
 
     # ── Phase F : Scores agrégés ──────────────────────────────────────────────

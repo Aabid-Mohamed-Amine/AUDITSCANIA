@@ -338,6 +338,12 @@ async def _run_sqlmap_single(
         if data:
             cmd += ["--data", data]
         cmd += ["--method=POST"]
+        # Explicit param targeting for POST -- focuses SQLMap on known injectable param
+        if params:
+            post_test_params = [p for p in params if p.lower() in {x.lower() for x in _HIGH_VALUE_PARAMS}]
+            if not post_test_params:
+                post_test_params = params
+            cmd += ["-p", ",".join(post_test_params[:5])]
         # --risk=3: needed for OR-based payloads (auth bypass); kept out of _BASE_FLAGS
         #   so GET targets keep --risk=1 (majority, no need for this aggressiveness).
         # --ignore-code=401,403,500: auth endpoints return 401/403 for invalid creds Ã¢â‚¬â€
@@ -511,7 +517,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
 
     # Budget: limit to top N targets within timeout
     # Each target gets a proportional timeout slice
-    max_targets    = min(len(all_targets), 6)
+    max_targets    = min(len(all_targets), 10)
     targets_to_run = all_targets[:max_targets]
     per_target_timeout = max(30, req.timeout // max(len(targets_to_run), 1) - 10)
 

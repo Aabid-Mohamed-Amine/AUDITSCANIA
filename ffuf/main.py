@@ -1,13 +1,13 @@
-"""
-FFUF — endpoint/directory discovery microservice v3.
+﻿"""
+FFUF â€” endpoint/directory discovery microservice v3.
 
-Améliorations anti-bruit :
-  1. Baseline comparison : probe d'un chemin inexistant → filtre -fs/-fw/-fl
-  2. Auto-calibration intelligente : -ac + filtres baseline combinés
-  3. Cluster deduplication : supprime les pages similaires (même taille ±5%)
+AmÃ©liorations anti-bruit :
+  1. Baseline comparison : probe d'un chemin inexistant â†’ filtre -fs/-fw/-fl
+  2. Auto-calibration intelligente : -ac + filtres baseline combinÃ©s
+  3. Cluster deduplication : supprime les pages similaires (mÃªme taille Â±5%)
   4. Severity classification : critical / high / medium / informational
-  5. Détection spécialisée : .git, backups, admin panels, config, debug, API
-  6. Filtre CDN : désactive -ac sur les CDN (Cloudflare, etc.)
+  5. DÃ©tection spÃ©cialisÃ©e : .git, backups, admin panels, config, debug, API
+  6. Filtre CDN : dÃ©sactive -ac sur les CDN (Cloudflare, etc.)
 """
 from __future__ import annotations
 
@@ -32,9 +32,9 @@ app = FastAPI(title="FFUF Discovery Microservice", version="3.0.0")
 WORDLIST_MAIN     = "/wordlists/common.txt"
 WORDLIST_FALLBACK = "/wordlists/fallback.txt"
 
-# ── Wordlist de base universelle ──────────────────────────────────────────────
-# Toujours testée, en plus de la wordlist principale, sur N'IMPORTE QUELLE cible.
-# Uniquement des chemins génériques — aucun chemin spécifique à une application.
+# â”€â”€ Wordlist de base universelle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Toujours testÃ©e, en plus de la wordlist principale, sur N'IMPORTE QUELLE cible.
+# Uniquement des chemins gÃ©nÃ©riques â€” aucun chemin spÃ©cifique Ã  une application.
 _UNIVERSAL_BASE: List[str] = [
     "robots.txt",
     ".env",
@@ -50,7 +50,7 @@ _UNIVERSAL_BASE: List[str] = [
     "backup",
     "logs",
     "server-status",
-    # Variantes génériques courantes (non spécifiques à une app)
+    # Variantes gÃ©nÃ©riques courantes (non spÃ©cifiques Ã  une app)
     ".env.local",
     ".env.production",
     ".git/config",
@@ -81,16 +81,16 @@ _STATIC_EXT = {
     ".woff", ".woff2", ".ttf", ".eot", ".map", ".mp4", ".webp", ".pdf",
 }
 
-# ── Severity classification rules ────────────────────────────────────────────
+# â”€â”€ Severity classification rules â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Each rule: (regex_pattern, severity, category_label, description)
-# Evaluated in order — first match wins.
+# Evaluated in order â€” first match wins.
 
 _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
-    # CRITICAL — secret/credential exposure
+    # CRITICAL â€” secret/credential exposure
     (r"(\.git/(config|HEAD|COMMIT_EDITMSG|packed-refs|index)|\.gitconfig)$",
      "critical", "git_exposure",      "Git repository internals exposed"),
     (r"\.env(\.(local|production|staging|backup|test|example))?$",
-     "critical", "secret_file",       "Environment file — may contain secrets/API keys"),
+     "critical", "secret_file",       "Environment file â€” may contain secrets/API keys"),
     (r"(id_rsa|\.ssh/|credentials\.json|\.aws/credentials|\.aws/config)$",
      "critical", "credentials",       "SSH key or cloud credentials file"),
     (r"(database|db)\.(sql|dump|bak|backup|gz)$",
@@ -98,15 +98,15 @@ _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
     (r"wp-config\.php$",
      "critical", "config_file",       "WordPress config with DB credentials"),
     (r"(docker-compose|\.dockerenv)(\.yml|\.yaml)?$",
-     "critical", "infra_config",      "Docker configuration — may reveal internal services"),
+     "critical", "infra_config",      "Docker configuration â€” may reveal internal services"),
     (r"\.htpasswd$",
      "critical", "credentials",       "Apache password file"),
     (r"(secrets|private|confidential)\.(yml|yaml|json|txt|env|php)$",
      "critical", "secret_file",       "Secrets file"),
     (r"(config|application)\.(yml|yaml)$",
-     "critical", "config_file",       "Application config — may contain DB/API credentials"),
+     "critical", "config_file",       "Application config â€” may contain DB/API credentials"),
 
-    # HIGH — admin panels & sensitive config
+    # HIGH â€” admin panels & sensitive config
     (r"(phpmyadmin|pma|adminer|dbadmin)(/?|\.php)$",
      "high", "admin_panel",   "Database admin panel"),
     (r"wp-admin/?$",
@@ -116,7 +116,7 @@ _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
     (r"(admin|administrator|administration|manage|management|backend)(/?|\.php|\.html|\.aspx)$",
      "high", "admin_panel",   "Admin panel"),
     (r"\.(bak|backup|old|orig|copy|save|~|\d+)$",
-     "high", "backup_file",   "Backup file — may expose source code"),
+     "high", "backup_file",   "Backup file â€” may expose source code"),
     (r"(backup|bak)\.(zip|tar\.gz|tgz|tar|7z|rar|sql)$",
      "high", "backup_archive","Backup archive"),
     (r"(web\.config|\.htaccess)$",
@@ -124,13 +124,13 @@ _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
     (r"(config|settings|configuration)\.(php|asp|aspx|ini|conf)$",
      "high", "config_file",   "Application config file"),
     (r"(install|installer|setup|upgrade)(/?|\.php|\.asp)$",
-     "high", "installer",     "Installer — may allow re-installation"),
+     "high", "installer",     "Installer â€” may allow re-installation"),
     (r"(xmlrpc\.php|wp-cron\.php)$",
      "high", "wordpress",     "WordPress attack surface"),
 
-    # MEDIUM — debug / info disclosure / test endpoints
+    # MEDIUM â€” debug / info disclosure / test endpoints
     (r"(phpinfo|php-info|php_info)(/?|\.php)$",
-     "medium", "debug_endpoint", "PHP info — full server configuration exposed"),
+     "medium", "debug_endpoint", "PHP info â€” full server configuration exposed"),
     (r"server-(status|info)/?$",
      "medium", "debug_endpoint", "Apache server status/info"),
     (r"(actuator|manage)(/?|/health|/env|/info|/metrics|/dump|/heapdump|/loggers)$",
@@ -140,7 +140,7 @@ _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
     (r"(console|rails/info|django-admin|_profiler)/?$",
      "medium", "debug_endpoint", "Framework console/profiler"),
     (r"(swagger|swagger-ui|api-docs|openapi|redoc)(/?|\.json|\.yaml)$",
-     "medium", "api_docs",    "API documentation — full endpoint listing"),
+     "medium", "api_docs",    "API documentation â€” full endpoint listing"),
     (r"(graphql|graphiql|playground)/?$",
      "medium", "api_endpoint","GraphQL endpoint"),
     (r"(test|tests|testing|dev|staging|demo)(/?|\.php)$",
@@ -148,15 +148,15 @@ _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
     (r"(trace|\.trace)$",
      "medium", "debug_endpoint", "HTTP TRACE enabled"),
     (r"(crossdomain\.xml|clientaccesspolicy\.xml)$",
-     "medium", "policy_file", "Cross-domain policy — check for overly permissive rules"),
+     "medium", "policy_file", "Cross-domain policy â€” check for overly permissive rules"),
 
-    # HIGH — API routes (elevated because auth bypass risk)
+    # HIGH â€” API routes (elevated because auth bypass risk)
     (r"/(api|rest|v\d+)(/|$)",
-     "high", "api_route",    "API route — injection/auth bypass surface"),
+     "high", "api_route",    "API route â€” injection/auth bypass surface"),
     (r"/(webhook|webhooks)/?$",
      "high", "api_route",    "Webhook endpoint"),
 
-    # MEDIUM — auth endpoints
+    # MEDIUM â€” auth endpoints
     (r"/(login|signin|sign-in|auth|oauth|sso|saml)(/?|\.php|\.html|\.aspx)$",
      "medium", "auth_endpoint", "Authentication endpoint"),
     (r"/(register|signup|sign-up)(/?|\.php|\.html)$",
@@ -166,7 +166,7 @@ _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
 
     # INFORMATIONAL
     (r"(robots\.txt|sitemap.*\.xml|\.well-known/.*)$",
-     "informational", "recon",       "Recon file — reveals paths/subdomains"),
+     "informational", "recon",       "Recon file â€” reveals paths/subdomains"),
     (r"(readme|changelog|license|authors?)(\.txt|\.md|\.html)?$",
      "informational", "disclosure",  "Version/tech disclosure"),
     (r"(upload|uploads|files|media|assets|static)/?$",
@@ -177,7 +177,7 @@ _SEVERITY_RULES: List[Tuple[str, str, str, str]] = [
 _COMPILED_RULES = [(re.compile(pat, re.I), sev, cat, desc) for pat, sev, cat, desc in _SEVERITY_RULES]
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class ScanRequest(BaseModel):
@@ -201,10 +201,10 @@ def _wordlist() -> str:
 
 def _make_scan_wordlist(base_path: str) -> str:
     """
-    Construit une wordlist combinée pour le scan : la base universelle
-    (_UNIVERSAL_BASE, toujours testée) en tête, puis la wordlist principale,
-    le tout dédupliqué. Retourne le chemin du fichier temporaire combiné, ou
-    base_path en cas d'échec d'écriture.
+    Construit une wordlist combinÃ©e pour le scan : la base universelle
+    (_UNIVERSAL_BASE, toujours testÃ©e) en tÃªte, puis la wordlist principale,
+    le tout dÃ©dupliquÃ©. Retourne le chemin du fichier temporaire combinÃ©, ou
+    base_path en cas d'Ã©chec d'Ã©criture.
     """
     combined = f"/tmp/ffuf_wl_{uuid.uuid4().hex[:10]}.txt"
     seen: set = set()
@@ -227,7 +227,7 @@ def _make_scan_wordlist(base_path: str) -> str:
                             out.write(w + "\n")
         return combined
     except Exception as exc:
-        logger.warning("Combined wordlist build failed (%s) — using base wordlist", exc)
+        logger.warning("Combined wordlist build failed (%s) â€” using base wordlist", exc)
         return base_path
 
 
@@ -242,7 +242,7 @@ def _is_cloud(target: str) -> bool:
     return any(host.endswith(c) for c in _CLOUD_HOSTS)
 
 
-# ── Baseline probe ────────────────────────────────────────────────────────────
+# â”€â”€ Baseline probe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 async def _get_baseline(target: str) -> Dict[str, Any]:
@@ -267,7 +267,7 @@ async def _get_baseline(target: str) -> Dict[str, Any]:
                 "words":  len(text.split()),
                 "lines":  text.count("\n"),
             })
-            logger.info("Baseline: %s → %d size=%d words=%d",
+            logger.info("Baseline: %s â†’ %d size=%d words=%d",
                         url, resp.status_code, baseline["size"], baseline["words"])
     except Exception as exc:
         baseline["error"] = str(exc)
@@ -284,10 +284,10 @@ def _build_filter_flags(baseline: Dict[str, Any], is_cloud: bool) -> List[str]:
     status = baseline.get("status")
     if status is None or baseline.get("error"):
         return flags
-    # If the server returns 404 or 400 → standard behavior, let FFUF handle it
+    # If the server returns 404 or 400 â†’ standard behavior, let FFUF handle it
     if status in (404, 400, 410, 501):
         return flags
-    # Custom 404 (returns 200/301/302) → filter by size and words
+    # Custom 404 (returns 200/301/302) â†’ filter by size and words
     size  = baseline.get("size")
     words = baseline.get("words")
     if size is not None and size > 0:
@@ -297,7 +297,7 @@ def _build_filter_flags(baseline: Dict[str, Any], is_cloud: bool) -> List[str]:
     return flags
 
 
-# ── Cluster deduplication (similar-page filter) ───────────────────────────────
+# â”€â”€ Cluster deduplication (similar-page filter) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _cluster_filter(results: List[Dict]) -> List[Dict]:
@@ -327,7 +327,7 @@ def _cluster_filter(results: List[Dict]) -> List[Dict]:
     return filtered
 
 
-# ── Severity classification ───────────────────────────────────────────────────
+# â”€â”€ Severity classification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _classify_severity(ep: Dict[str, Any]) -> Tuple[str, str, str]:
@@ -352,11 +352,11 @@ def _classify_severity(ep: Dict[str, Any]) -> Tuple[str, str, str]:
     if status == 200:
         return "informational", "page",    "Accessible page"
     if status in (401, 403):
-        return "medium", "restricted",     "Restricted — may be bypassable"
+        return "medium", "restricted",     "Restricted â€” may be bypassable"
     if status in (301, 302, 307):
         return "informational", "redirect","Redirect"
     if status == 500:
-        return "medium", "server_error",   "Server error — may reveal stack trace"
+        return "medium", "server_error",   "Server error â€” may reveal stack trace"
     return "informational", "other", "Endpoint"
 
 
@@ -379,7 +379,7 @@ def _build_classified(endpoints: List[Dict]) -> Dict[str, Any]:
     return {"by_severity": by_severity, "by_category": by_category}
 
 
-# ── FFUF runner ───────────────────────────────────────────────────────────────
+# â”€â”€ FFUF runner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 async def _run_ffuf(
@@ -411,7 +411,7 @@ async def _run_ffuf(
         cmd += ["-e", exts]
     if extra_filters:
         cmd += extra_filters
-    # ── Auth injection ────────────────────────────────────────────────────
+    # â”€â”€ Auth injection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if auth_headers:
         for hname, hval in auth_headers.items():
             cmd += ["-H", f"{hname}: {hval}"]
@@ -438,7 +438,7 @@ def _read_results(output_file: str) -> List[Dict[str, Any]]:
         return []
 
 
-# ── Main endpoint ─────────────────────────────────────────────────────────────
+# â”€â”€ Main endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get("/health")
@@ -451,7 +451,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     target_url   = _normalize(req.target)
     fuzz_url     = f"{target_url}/FUZZ"
     is_cloud     = _is_cloud(target_url)
-    logger.info("FFUF scan — target=%s cloud=%s", target_url, is_cloud)
+    logger.info("FFUF scan â€” target=%s cloud=%s", target_url, is_cloud)
 
     result: Dict[str, Any] = {
         "target":      target_url,
@@ -466,8 +466,8 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "error":       None,
     }
 
-    # "fallback" = petite liste (164 entrées) pour les scans rapides (Phase 2)
-    # "auto" / "full" = liste complète (4750+ entrées) pour les scans détaillés (Phase 3)
+    # "fallback" = petite liste (164 entrÃ©es) pour les scans rapides (Phase 2)
+    # "auto" / "full" = liste complÃ¨te (4750+ entrÃ©es) pour les scans dÃ©taillÃ©s (Phase 3)
     if req.wordlist == "fallback":
         base_wordlist = WORDLIST_FALLBACK
         wordlist      = _make_scan_wordlist(base_wordlist)
@@ -477,7 +477,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         wordlist      = _make_scan_wordlist(base_wordlist)   # base universelle + principale
     exts          = ",".join(f".{e.lstrip('.')}" for e in req.extensions) if req.extensions else ""
 
-    # ── 1. Baseline probe ────────────────────────────────────────────────────
+    # â”€â”€ 1. Baseline probe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     baseline       = await _get_baseline(target_url)
     result["baseline"] = baseline
     filter_flags   = _build_filter_flags(baseline, is_cloud)
@@ -487,8 +487,8 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     raw_results: List[Dict] = []
 
     try:
-        # ── 2. Strategy selection ────────────────────────────────────────────
-        # Cloud CDN: no -ac (CDN normalizes responses → over-filters)
+        # â”€â”€ 2. Strategy selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # Cloud CDN: no -ac (CDN normalizes responses â†’ over-filters)
         # Otherwise: -ac + baseline filters for best coverage
         use_ac = not is_cloud and not filter_flags
 
@@ -500,7 +500,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
 
         raw_results = _read_results(output_file)
 
-        # ── 3. Retry without -ac if 0 results (over-calibrated) ─────────────
+        # â”€â”€ 3. Retry without -ac if 0 results (over-calibrated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if use_ac and not raw_results:
             logger.info("FFUF -ac returned 0 results, retrying without -ac (keeping size filters)")
             try: os.unlink(output_file)
@@ -513,7 +513,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             )
             raw_results = _read_results(output_file)
 
-        # ── 4. Retry without any filter if still 0 (very strict server) ─────
+        # â”€â”€ 4. Retry without any filter if still 0 (very strict server) â”€â”€â”€â”€â”€
         if not raw_results and filter_flags:
             logger.info("FFUF still 0 results, retrying without filters")
             try: os.unlink(output_file)
@@ -533,7 +533,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             logger.info("FFUF: no results for %s", target_url)
             return result
 
-        # ── 5. Parse raw results ─────────────────────────────────────────────
+        # â”€â”€ 5. Parse raw results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         raw_endpoints: List[Dict] = []
         by_status: Dict[int, int]  = {}
         for r in raw_results:
@@ -549,7 +549,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             raw_endpoints.append(ep)
             by_status[status] = by_status.get(status, 0) + 1
 
-        # ── 6. Post-processing filters ───────────────────────────────────────
+        # â”€â”€ 6. Post-processing filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # 6a. Cluster deduplication (similar-page filter)
         endpoints = _cluster_filter(raw_endpoints)
 
@@ -563,7 +563,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         if dominant_exact:
             before = len(endpoints)
             endpoints = [ep for ep in endpoints if ep["length"] not in dominant_exact]
-            logger.info("Dominant-size filter: %d → %d", before, len(endpoints))
+            logger.info("Dominant-size filter: %d â†’ %d", before, len(endpoints))
 
         # Sort: 200s first, then by status, then alphabetically
         endpoints.sort(key=lambda x: (
@@ -572,10 +572,48 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             x.get("url", ""),
         ))
 
-        # ── 7. Severity classification ───────────────────────────────────────
+        # â”€â”€ 6b. Generic param probing on top endpoints â”€â”€
+        # FFUF only discovers paths via wordlist; it never checks whether a
+        # discovered endpoint accepts common GET params (id, q, search...).
+        # Probe a sample of "live" endpoints (2xx/3xx only -- error pages like
+        # 500/401 vary on every request regardless of params and would just
+        # add noise) and flag params whose response differs from the bare
+        # baseline. Mutates `endpoints` in place (the list _build_classified
+        # below copies from), so the flag survives into both result["endpoints"]
+        # and result["by_severity"] -- feeding SQLMap/Dalfox downstream.
+        _PARAM_PROBE_NAMES = ["id", "q", "search", "page", "sort", "filter", "category"]
+        _probe_candidates = [e for e in endpoints if e.get("status") in (200, 201, 301, 302)][:15]
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, verify=False) as _pclient:
+            for _ep in _probe_candidates:
+                _base_ep_url = _ep.get("url", "")
+                if not _base_ep_url or "?" in _base_ep_url:
+                    continue
+                try:
+                    _baseline_resp = await _pclient.get(_base_ep_url)
+                    if _baseline_resp.status_code >= 400:
+                        continue
+                    _baseline_len = len(_baseline_resp.content)
+                except Exception:
+                    continue
+                _accepted_params = []
+                for _pname in _PARAM_PROBE_NAMES:
+                    try:
+                        _r = await _pclient.get(_base_ep_url, params={_pname: "1"})
+                        if _r.status_code != _baseline_resp.status_code:
+                            continue
+                        if abs(len(_r.content) - _baseline_len) > 5:
+                            _accepted_params.append(_pname)
+                    except Exception:
+                        pass
+                if _accepted_params:
+                    _ep["params_accepted"] = _accepted_params
+
+        # â”€â”€ 7. Severity classification
         classified   = _build_classified(endpoints)
         by_severity  = classified["by_severity"]
         by_category  = classified["by_category"]
+
+
 
         severity_counts = {k: len(v) for k, v in by_severity.items() if v}
         sensitive_urls  = [
@@ -603,13 +641,13 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     finally:
         try: os.unlink(output_file)
         except Exception: pass
-        # Nettoyage de la wordlist combinée temporaire
+        # Nettoyage de la wordlist combinÃ©e temporaire
         if wordlist != base_wordlist:
             try: os.unlink(wordlist)
             except Exception: pass
 
     logger.info(
-        "FFUF done — %s | total=%d critical=%d high=%d medium=%d",
+        "FFUF done â€” %s | total=%d critical=%d high=%d medium=%d",
         target_url, result["total"],
         result["severity_counts"].get("critical", 0),
         result["severity_counts"].get("high", 0),

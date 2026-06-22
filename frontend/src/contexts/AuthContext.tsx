@@ -41,12 +41,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string, rememberMe = false) => {
-    // Set persistence preference BEFORE storing tokens so _store() picks the right storage
     tokenStore.setRemember(rememberMe);
-    const { access_token, refresh_token } = await authApi.login(email, password);
-    tokenStore.set(access_token, refresh_token);
-    setToken(access_token);
-    const me = await authApi.me(access_token);
+    const data = await authApi.login(email, password);
+    tokenStore.set(data.access_token, data.refresh_token);
+    setToken(data.access_token);
+    // Use user from login response if present (new backend), fallback to /me (old backend)
+    const me = data.user ?? await authApi.me(data.access_token);
     setUser(me);
   };
 

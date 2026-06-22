@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind Config Verbatim from DESIGN_SYSTEM_8 -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error-container": "#93000a",
+                        "outline": "#76777d",
+                        "surface-container-high": "#e2e8f8",
+                        "tertiary-container": "#341100",
+                        "secondary-container": "#316bf3",
+                        "surface-tint": "#575e70",
+                        "secondary-fixed": "#dbe1ff",
+                        "surface": "#f9f9ff",
+                        "on-surface-variant": "#45464c",
+                        "surface-dim": "#d3daea",
+                        "on-error": "#ffffff",
+                        "on-primary-fixed-variant": "#404758",
+                        "on-tertiary-container": "#d95f00",
+                        "surface-container-lowest": "#ffffff",
+                        "background": "#f9f9ff",
+                        "on-background": "#151c27",
+                        "on-secondary-fixed": "#00174b",
+                        "on-primary-fixed": "#141b2b",
+                        "on-surface": "#151c27",
+                        "secondary-fixed-dim": "#b4c5ff",
+                        "tertiary": "#000000",
+                        "outline-variant": "#c6c6cd",
+                        "surface-variant": "#dce2f3",
+                        "surface-container-highest": "#dce2f3",
+                        "on-primary": "#ffffff",
+                        "inverse-on-surface": "#ebf1ff",
+                        "on-secondary-container": "#fefcff",
+                        "on-tertiary-fixed": "#341100",
+                        "primary-container": "#141b2b",
+                        "surface-container": "#e7eefe",
+                        "tertiary-fixed": "#ffdbca",
+                        "secondary": "#0051d5",
+                        "on-primary-container": "#7d8497",
+                        "on-tertiary-fixed-variant": "#783200",
+                        "surface-container-low": "#f0f3ff",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "primary-fixed-dim": "#c0c6db",
+                        "inverse-surface": "#2a313d",
+                        "primary": "#000000",
+                        "inverse-primary": "#c0c6db",
+                        "error-container": "#ffdad6",
+                        "primary-fixed": "#dce2f7",
+                        "on-secondary-fixed-variant": "#003ea8",
+                        "tertiary-fixed-dim": "#ffb690",
+                        "surface-bright": "#f9f9ff",
+                        "error": "#ba1a1a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "sm": "8px",
+                        "gutter": "16px",
+                        "base": "4px",
+                        "container-margin": "32px",
+                        "lg": "24px",
+                        "md": "16px",
+                        "xs": "4px",
+                        "xl": "32px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Geist"],
+                        "headline-sm": ["Geist"],
+                        "body-md": ["Geist"],
+                        "headline-lg": ["Geist"],
+                        "label-sm": ["JetBrains Mono"],
+                        "headline-lg-mobile": ["Geist"],
+                        "headline-xl": ["Geist"],
+                        "label-md": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "headline-lg-mobile": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "headline-xl": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-md": ["13px", {"lineHeight": "16px", "fontWeight": "500"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #f9f9ff;
+            color: #151c27;
+            -webkit-font-smoothing: antialiased;
+            font-family: 'Geist', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .scanner-glow {
+            box-shadow: 0 4px 20px rgba(0, 81, 213, 0.08);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f0f3ff;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #c6c6cd;
+        }
+        @keyframes pulse-primary {
+            0% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 0, 0, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); }
+        }
+        .pulse-valid {
+            animation: pulse-primary 2s infinite;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md overflow-hidden">
+<!-- Side Navigation Shell -->
+<aside class="fixed h-full w-[240px] left-0 top-0 bg-surface-container border-r border-outline-variant flex flex-col py-md px-sm z-50">
+<div class="mb-8 px-4">
+<div class="font-headline-sm text-headline-sm font-bold tracking-tighter text-primary">CYBER-OPS</div>
+<div class="font-label-sm text-label-sm text-outline opacity-60">v2.4.0-STABLE</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="security">security</span>
+<span class="font-body-md">Scan Results</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span class="font-body-md">Scan History</span>
+</a>
+<!-- Active Tab -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-secondary font-bold bg-surface-container-high border-r-2 border-secondary transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="rocket_launch">rocket_launch</span>
+<span class="font-body-md">Launch Scan</span>
+</a>
+</nav>
+<div class="mt-auto pt-4 border-t border-outline-variant">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="monitor_heart">monitor_heart</span>
+<span class="font-body-md">System Health</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-body-md">Settings</span>
+</a>
+</div>
+</aside>
+<!-- Top App Bar -->
+<header class="fixed top-0 right-0 w-[calc(100%-240px)] h-16 bg-surface-container-lowest border-b border-outline-variant flex justify-between items-center px-gutter z-40">
+<div class="flex items-center gap-4">
+<h1 class="font-headline-lg text-headline-lg font-black text-on-surface uppercase tracking-tight">Aegis Pentest</h1>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative hidden lg:block">
+<input class="bg-surface-container-low border border-outline-variant rounded-full px-4 py-1.5 text-body-md w-64 focus:outline-none focus:border-primary transition-all" placeholder="Search vulnerabilities..." type="text"/>
+<span class="material-symbols-outlined absolute right-3 top-1.5 text-outline text-lg" data-icon="search">search</span>
+</div>
+<div class="flex items-center gap-4 text-on-surface-variant">
+<button class="material-symbols-outlined hover:text-primary transition-all active:scale-95" data-icon="notifications">notifications</button>
+<button class="material-symbols-outlined hover:text-primary transition-all active:scale-95" data-icon="wifi_tethering">wifi_tethering</button>
+<button class="material-symbols-outlined hover:text-primary transition-all active:scale-95" data-icon="account_tree">account_tree</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant ml-2">
+<img alt="Analyst Avatar" class="w-full h-full object-cover" data-alt="A professional headshot of a cybersecurity analyst with short dark hair and a neutral expression, set against a dark architectural background. The lighting is moody and technical with cool blue undertones, fitting a high-security cyber-ops command center aesthetic." src="https://lh3.googleusercontent.com/aida/AP1WRLt9Wp0Xtsr4FrFyt-61iebLa9q9DuoLiSk8NH72bXD_p-ct6DpwG6gSrlmvnoUqEUrEy_kNku_YjOm_kM6unxzXlB8pu3uT4rtnKTveiLBVUq6hW4ZIiqfzfh7x2LZ-sCKiP5Q92jPhTShq5buFwwfsBYfxvVFCFO_C6H204yuiPWyht3G52NIvmvMfpm96e7jug0y6CM1Urlw4KVYKw5U4VpxyW3CL71fMz1fdFVTiGXNBaa0qUqFqFzOZ"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="ml-[240px] mt-16 p-container-margin h-[calc(100vh-64px)] overflow-y-auto custom-scrollbar flex flex-col items-center justify-center relative">
+<!-- Background Decor -->
+<div class="absolute inset-0 overflow-hidden pointer-events-none opacity-40">
+<div class="absolute top-1/4 -left-20 w-96 h-96 bg-primary/5 blur-[120px] rounded-full"></div>
+<div class="absolute bottom-1/4 -right-20 w-96 h-96 bg-secondary/5 blur-[120px] rounded-full"></div>
+</div>
+<div class="w-full max-w-4xl space-y-8 relative z-10">
+<!-- Header Section -->
+<div class="text-center space-y-2">
+<h2 class="font-headline-xl text-headline-xl text-on-surface tracking-tight">Initiate Security Reconnaissance</h2>
+<p class="text-on-surface-variant font-body-lg max-w-2xl mx-auto">Deploy a specialized automated probe against your target. Choose your profile and configure parameters for a precision audit.</p>
+</div>
+<!-- Core Input Card -->
+<div class="bg-surface-container-lowest border border-outline-variant p-8 rounded-xl scanner-glow backdrop-blur-sm shadow-sm">
+<div class="space-y-6">
+<!-- Target Input -->
+<div class="space-y-2">
+<label class="font-label-sm text-label-sm text-outline ml-1 uppercase tracking-wider">Target Identity (URL or IP)</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline" data-icon="language">language</span>
+<input class="w-full bg-surface-container-low border border-outline-variant focus:border-primary focus:ring-2 focus:ring-primary/20 rounded-lg pl-12 pr-4 py-4 font-label-md text-on-surface text-lg transition-all outline-none" id="targetInput" placeholder="https://api.example.com or 192.168.1.1" type="text"/>
+</div>
+</div>
+<!-- Scan Profile Selection -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<!-- Quick Scan -->
+<label class="cursor-pointer group">
+<input checked="" class="hidden peer" name="scan-type" type="radio"/>
+<div class="h-full border border-outline-variant bg-surface-container-low p-4 rounded-lg peer-checked:border-secondary peer-checked:bg-secondary/5 group-hover:border-secondary/50 group-hover:bg-surface-container-high transition-all shadow-sm hover:shadow-md">
+<div class="flex items-center gap-3 mb-2">
+<span class="material-symbols-outlined text-secondary" data-icon="bolt">bolt</span>
+<span class="font-headline-sm text-on-surface">Quick</span>
+</div>
+<p class="text-label-sm text-on-surface-variant leading-tight">Top 100 ports, common CVEs, SSL check. (Est. 5m)</p>
+</div>
+</label>
+<!-- Deep Scan -->
+<label class="cursor-pointer group">
+<input class="hidden peer" name="scan-type" type="radio"/>
+<div class="h-full border border-outline-variant bg-surface-container-low p-4 rounded-lg peer-checked:border-secondary peer-checked:bg-secondary/5 group-hover:border-secondary/50 group-hover:bg-surface-container-high transition-all shadow-sm hover:shadow-md">
+<div class="flex items-center gap-3 mb-2">
+<span class="material-symbols-outlined text-secondary" data-icon="troubleshoot">troubleshoot</span>
+<span class="font-headline-sm text-on-surface">Deep</span>
+</div>
+<p class="text-label-sm text-on-surface-variant leading-tight">Full port scan, OS fingerprinting, script engine. (Est. 45m)</p>
+</div>
+</label>
+<!-- Full Pentest -->
+<label class="cursor-pointer group">
+<input class="hidden peer" name="scan-type" type="radio"/>
+<div class="h-full border border-outline-variant bg-surface-container-low p-4 rounded-lg peer-checked:border-secondary peer-checked:bg-secondary/5 group-hover:border-secondary/50 group-hover:bg-surface-container-high transition-all shadow-sm hover:shadow-md">
+<div class="flex items-center gap-3 mb-2">
+<span class="material-symbols-outlined text-secondary" data-icon="shield_with_heart">shield_with_heart</span>
+<span class="font-headline-sm text-on-surface">Pentest</span>
+</div>
+<p class="text-label-sm text-on-surface-variant leading-tight">Intrusive payloads, fuzzer, lateral movement path check. (Est. 4h+)</p>
+</div>
+</label>
+</div>
+<!-- Advanced Toggle -->
+<details class="group border-t border-outline-variant pt-4">
+<summary class="flex items-center justify-between cursor-pointer list-none text-on-surface-variant hover:text-on-surface transition-colors">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-outline group-open:rotate-90 transition-transform" data-icon="chevron_right">chevron_right</span>
+<span class="font-label-sm uppercase tracking-wider">Advanced Parameters</span>
+</div>
+<div class="h-[1px] flex-1 bg-outline-variant mx-4 opacity-50"></div>
+</summary>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 mt-6">
+<div class="space-y-1">
+<label class="font-label-sm text-[10px] text-outline uppercase tracking-wider">Target Ports</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 text-label-md text-on-surface focus:border-primary outline-none" type="text" value="80, 443, 8080, 22, 21"/>
+</div>
+<div class="space-y-1">
+<label class="font-label-sm text-[10px] text-outline uppercase tracking-wider">User-Agent Spoofer</label>
+<select class="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 text-label-md text-on-surface focus:border-primary outline-none appearance-none">
+<option>Chrome/119.0.0.0 (Windows)</option>
+<option>Nmap Scripting Engine</option>
+<option>Aegis-Scanner/2.4 (Security Audit)</option>
+<option>Custom Header...</option>
+</select>
+</div>
+<div class="flex items-center gap-3">
+<input class="rounded border-outline-variant bg-surface-container-lowest text-secondary focus:ring-secondary h-4 w-4" id="stealth" type="checkbox"/>
+<label class="font-body-md text-on-surface-variant" for="stealth">Enable Stealth Mode (Adaptive Timings)</label>
+</div>
+<div class="flex items-center gap-3">
+<input checked="" class="rounded border-outline-variant bg-surface-container-lowest text-secondary focus:ring-secondary h-4 w-4" id="reports" type="checkbox"/>
+<label class="font-body-md text-on-surface-variant" for="reports">Auto-Generate PDF Executive Report</label>
+</div>
+</div>
+</details>
+<!-- Action Button -->
+<div class="pt-4">
+<button class="w-full bg-primary hover:opacity-90 text-on-primary font-headline-sm py-5 rounded-lg flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-lg shadow-primary/20" id="launchBtn">
+<span class="material-symbols-outlined text-2xl" data-icon="rocket_launch">rocket_launch</span>
+                            LAUNCH SECURITY SCAN
+                        </button>
+</div>
+</div>
+</div>
+<!-- Live Terminal Preview -->
+<div class="bg-[#111827] rounded-lg border border-outline-variant overflow-hidden shadow-2xl">
+<div class="bg-[#1f2937] px-4 py-2 flex items-center justify-between border-b border-white/5">
+<div class="flex items-center gap-2">
+<div class="w-3 h-3 rounded-full bg-red-500/60"></div>
+<div class="w-3 h-3 rounded-full bg-yellow-500/60"></div>
+<div class="w-3 h-3 rounded-full bg-green-500/60"></div>
+<span class="text-label-sm text-gray-400 ml-2">Console :: Pre-Flight Readiness</span>
+</div>
+<span class="text-label-sm text-gray-500">Terminal v0.98</span>
+</div>
+<div class="p-4 font-label-md text-green-400/90 h-40 overflow-y-auto custom-scrollbar" id="consoleOutput">
+<p class="opacity-50 text-gray-400">[SYSTEM] Aegis Command-Line Interface loaded.</p>
+<p class="opacity-50 text-gray-400">[SYSTEM] Initializing scan modules...</p>
+<p class="opacity-50 text-gray-400">[SYSTEM] Waiting for target identification...</p>
+</div>
+</div>
+</div>
+</main>
+<script>
+        const launchBtn = document.getElementById('launchBtn');
+        const targetInput = document.getElementById('targetInput');
+        const consoleOutput = document.getElementById('consoleOutput');
+        
+        const logs = [
+            "[INFO] Resolving target DNS...",
+            "[INFO] Routing packets through secure nodes...",
+            "[WARN] Target firewall detected. Adjusting evasion techniques...",
+            "[SYSTEM] Loading plugin: vulnerability-scanner.so",
+            "[SYSTEM] Loading plugin: port-mapper.so",
+            "[INFO] Handshake established. Beginning scan..."
+        ];
+
+        // Interactivity: Pulse effect when form is valid
+        targetInput.addEventListener('input', (e) => {
+            if (e.target.value.length > 3) {
+                launchBtn.classList.add('pulse-valid');
+            } else {
+                launchBtn.classList.remove('pulse-valid');
+            }
+        });
+
+        launchBtn.addEventListener('click', () => {
+            launchBtn.innerHTML = `<span class="material-symbols-outlined animate-spin" data-icon="sync">sync</span> DEPLOYING PROBES...`;
+            launchBtn.classList.remove('pulse-valid');
+            launchBtn.classList.replace('bg-primary', 'bg-surface-container-high');
+            launchBtn.classList.replace('text-on-primary', 'text-on-surface-variant');
+            launchBtn.disabled = true;
+
+            let i = 0;
+            const interval = setInterval(() => {
+                if(i < logs.length) {
+                    const p = document.createElement('p');
+                    p.className = "animate-pulse mt-1";
+                    p.textContent = logs[i];
+                    consoleOutput.appendChild(p);
+                    consoleOutput.scrollTop = consoleOutput.scrollHeight;
+                    i++;
+                } else {
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        alert('Scan pipeline initiated successfully. Redirecting to results dashboard...');
+                        location.reload();
+                    }, 1500);
+                }
+            }, 600);
+        });
+    </script>
+</body></html>

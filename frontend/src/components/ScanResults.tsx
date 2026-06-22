@@ -51,12 +51,12 @@ function Section({
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
   return (
-    <div className="border border-slate-700 rounded-lg overflow-hidden">
+    <div className="border border-[#e5e7eb] rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-slate-800/60 hover:bg-slate-800 text-left transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 bg-[#f5f7fa] hover:bg-[#eff2f7] text-left transition-colors"
       >
-        <span className="text-sm font-medium text-slate-200">{title}</span>
+        <span className="text-sm font-semibold text-slate-800">{title}</span>
         {open ? (
           <ChevronUp className="h-4 w-4 text-slate-400" />
         ) : (
@@ -154,9 +154,9 @@ function DownloadBar({ scan }: { scan: Scan }) {
   if (!isCompleted) return null;
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl mb-2">
+    <div className="flex items-center gap-3 px-4 py-3 bg-[#f5f7fa] border border-[#e5e7eb] rounded-xl mb-2">
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-slate-300">Export report</p>
+        <p className="text-xs font-medium text-slate-700">Export report</p>
         <p className="text-[10px] text-slate-500 mt-0.5">
           JSON structuré  · PDF professionnel BDO
         </p>
@@ -167,7 +167,7 @@ function DownloadBar({ scan }: { scan: Scan }) {
         onClick={jsonDl.trigger}
         disabled={jsonDl.state === "loading" || pdfDl.state === "loading"}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                   bg-slate-700 hover:bg-slate-600 text-slate-200
+                   bg-white hover:bg-[#eff2f7] text-slate-700 border border-[#e5e7eb]
                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         title="Télécharger le rapport JSON structuré"
       >
@@ -219,7 +219,7 @@ const RISK_BADGE_CLS: Record<string, string> = {
   HIGH:          "bg-orange-500/20 text-orange-400 border border-orange-500/30",
   MEDIUM:        "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30",
   LOW:           "bg-blue-500/20 text-blue-400 border border-blue-500/30",
-  INFORMATIONAL: "bg-slate-700/50 text-slate-400 border border-slate-600",
+  INFORMATIONAL: "bg-[#e8f4f8] text-[#64748b] border border-[#b3d4e0]",
 };
 
 function PipelineOverview({ scan }: { scan: Scan }) {
@@ -314,7 +314,7 @@ function PipelineOverview({ scan }: { scan: Scan }) {
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
 
       {/* ── Phase 1 — Recon ── */}
-      <div className="bg-slate-800/50 border border-cyan-500/20 rounded-xl p-4 space-y-1.5">
+      <div className="bg-white border border-cyan-500/20 rounded-xl p-4 space-y-1.5">
         <div className="flex items-center gap-2 mb-3">
           <div className="p-1.5 bg-cyan-500/10 rounded-lg">
             <Search className="h-4 w-4 text-cyan-400" />
@@ -331,7 +331,7 @@ function PipelineOverview({ scan }: { scan: Scan }) {
       </div>
 
       {/* ── Phase 2 — Active Scan ── */}
-      <div className="bg-slate-800/50 border border-blue-500/20 rounded-xl p-4 space-y-1.5">
+      <div className="bg-white border border-blue-500/20 rounded-xl p-4 space-y-1.5">
         <div className="flex items-center gap-2 mb-3">
           <div className="p-1.5 bg-blue-500/10 rounded-lg">
             <Zap className="h-4 w-4 text-blue-400" />
@@ -349,7 +349,7 @@ function PipelineOverview({ scan }: { scan: Scan }) {
       </div>
 
       {/* ── Phase 3 — Exploitation ── */}
-      <div className="bg-slate-800/50 border border-orange-500/20 rounded-xl p-4 space-y-1.5">
+      <div className="bg-white border border-orange-500/20 rounded-xl p-4 space-y-1.5">
         <div className="flex items-center gap-2 mb-3">
           <div className="p-1.5 bg-orange-500/10 rounded-lg">
             <Terminal className="h-4 w-4 text-orange-400" />
@@ -377,7 +377,7 @@ function PipelineOverview({ scan }: { scan: Scan }) {
       </div>
 
       {/* ── Phase 4 — Correlation ── */}
-      <div className="bg-slate-800/50 border border-purple-500/20 rounded-xl p-4 space-y-1.5">
+      <div className="bg-white border border-purple-500/20 rounded-xl p-4 space-y-1.5">
         <div className="flex items-center gap-2 mb-3">
           <div className="p-1.5 bg-purple-500/10 rounded-lg">
             <Layers className="h-4 w-4 text-purple-400" />
@@ -394,7 +394,7 @@ function PipelineOverview({ scan }: { scan: Scan }) {
       </div>
 
       {/* ── Phase 5 — SOC Dashboard ── */}
-      <div className="bg-slate-800/50 border border-green-500/20 rounded-xl p-4 space-y-1.5">
+      <div className="bg-white border border-green-500/20 rounded-xl p-4 space-y-1.5">
         <div className="flex items-center gap-2 mb-3">
           <div className="p-1.5 bg-green-500/10 rounded-lg">
             <ShieldCheck className="h-4 w-4 text-green-400" />
@@ -411,7 +411,7 @@ function PipelineOverview({ scan }: { scan: Scan }) {
         ) : (
           <p className="text-xs text-slate-600 text-center italic">Awaiting…</p>
         )}
-        {recsCount > 0 && <PhaseStat label="Recommandations" value={recsCount} color="text-slate-300" />}
+        {recsCount > 0 && <PhaseStat label="Recommandations" value={recsCount} color="text-slate-700" />}
         {attackPaths > 0 && <PhaseStat label="Attack paths" value={attackPaths} color="text-orange-400" />}
       </div>
 
@@ -433,9 +433,9 @@ function ShodanPanel({ data }: { data: Record<string, unknown> | null }) {
     <div className="space-y-4">
       {!!data.error && <ErrorBanner message={`Error: ${String(data.error)}`} />}
       {!!data.resolved_ip && (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-600">
           Resolved IP:{" "}
-          <span className="font-mono text-slate-200">{String(data.resolved_ip)}</span>
+          <span className="font-mono text-slate-800">{String(data.resolved_ip)}</span>
         </p>
       )}
       {internetdb && (
@@ -494,7 +494,7 @@ function VirusTotalPanel({ data }: { data: Record<string, unknown> | null }) {
             { key: "malicious",  color: "text-red-400",    bg: "bg-red-400/10"    },
             { key: "suspicious", color: "text-yellow-400", bg: "bg-yellow-400/10" },
             { key: "harmless",   color: "text-green-400",  bg: "bg-green-400/10"  },
-            { key: "undetected", color: "text-slate-400",  bg: "bg-slate-700/50"  },
+            { key: "undetected", color: "text-slate-600",  bg: "bg-[#f5f7fa]"  },
           ].map(({ key, color, bg }) => (
             <div key={key} className={`${bg} rounded-lg p-3 text-center`}>
               <p className={`text-2xl font-bold ${color}`}>{String(stats[key] ?? 0)}</p>
@@ -540,16 +540,16 @@ function AbuseIPDBPanel({ data }: { data: Record<string, unknown> | null }) {
       {d && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <div className="bg-slate-800 rounded-lg p-4 text-center">
+            <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg p-4 text-center">
               <p className={`text-3xl font-bold ${scoreColor}`}>{score}%</p>
               <p className="text-xs text-slate-500 mt-1">Abuse Score</p>
             </div>
-            <div className="bg-slate-800 rounded-lg p-4 text-center">
-              <p className="text-3xl font-bold text-slate-200">{String(d.total_reports ?? 0)}</p>
+            <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg p-4 text-center">
+              <p className="text-3xl font-bold text-slate-800">{String(d.total_reports ?? 0)}</p>
               <p className="text-xs text-slate-500 mt-1">Total Reports</p>
             </div>
-            <div className="bg-slate-800 rounded-lg p-4 text-center">
-              <p className="text-3xl font-bold text-slate-200">{String(d.num_distinct_users ?? 0)}</p>
+            <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg p-4 text-center">
+              <p className="text-3xl font-bold text-slate-800">{String(d.num_distinct_users ?? 0)}</p>
               <p className="text-xs text-slate-500 mt-1">Distinct Users</p>
             </div>
           </div>
@@ -560,7 +560,7 @@ function AbuseIPDBPanel({ data }: { data: Record<string, unknown> | null }) {
               d[key] ? (
                 <div key={label} className="flex gap-2">
                   <span className="text-slate-500">{label}:</span>
-                  <span className="text-slate-300">{String(d[key])}</span>
+                  <span className="text-slate-700">{String(d[key])}</span>
                 </div>
               ) : null
             )}
@@ -589,7 +589,7 @@ function NmapPanel({ data }: { data: Record<string, unknown> | null }) {
       {!!data.error && <ErrorBanner message={`Error: ${String(data.error)}`} />}
       {!!data.scan_method && (
         <p className="text-xs text-slate-500">
-          Scan method: <span className="text-slate-300">{String(data.scan_method)}</span>
+          Scan method: <span className="text-slate-700">{String(data.scan_method)}</span>
         </p>
       )}
       {hosts.map((host, i) => {
@@ -614,7 +614,7 @@ function NmapPanel({ data }: { data: Record<string, unknown> | null }) {
                 <div className="overflow-auto">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="text-slate-500 border-b border-slate-700">
+                      <tr className="text-slate-500 border-b border-[#e5e7eb]">
                         <th className="text-left pb-2 pr-4">Port</th>
                         <th className="text-left pb-2 pr-4">Protocol</th>
                         <th className="text-left pb-2 pr-4">Service</th>
@@ -624,11 +624,11 @@ function NmapPanel({ data }: { data: Record<string, unknown> | null }) {
                     </thead>
                     <tbody>
                       {openPorts.map((p, j) => (
-                        <tr key={j} className="border-b border-slate-800 hover:bg-slate-800/50">
-                          <td className="py-1.5 pr-4 font-mono text-cyan-400">{String(p.port)}</td>
-                          <td className="py-1.5 pr-4 text-slate-400 uppercase text-[10px]">{String(p.protocol)}</td>
-                          <td className="py-1.5 pr-4 text-slate-300">{String(p.service || "–")}</td>
-                          <td className="py-1.5 pr-4 text-slate-400">{String(p.product || "–")}</td>
+                        <tr key={j} className="border-b border-[#f0f0f0] hover:bg-[#f5f7fa]">
+                          <td className="py-1.5 pr-4 font-mono text-blue-600">{String(p.port)}</td>
+                          <td className="py-1.5 pr-4 text-slate-500 uppercase text-[10px]">{String(p.protocol)}</td>
+                          <td className="py-1.5 pr-4 text-slate-700">{String(p.service || "–")}</td>
+                          <td className="py-1.5 pr-4 text-slate-600">{String(p.product || "–")}</td>
                           <td className="py-1.5 text-slate-500">{String(p.version || "–")}</td>
                         </tr>
                       ))}
@@ -722,16 +722,16 @@ function FindingCard({ finding }: { finding: NucleiFinding }) {
   const variant = SEVERITY_VARIANT[finding.severity] ?? "secondary";
 
   return (
-    <div className="border border-slate-700 rounded-lg overflow-hidden">
+    <div className="border border-[#e5e7eb] rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-start gap-3 px-4 py-3 bg-slate-800/40 hover:bg-slate-800 text-left transition-colors"
+        className="w-full flex items-start gap-3 px-4 py-3 bg-[#f9f9ff] hover:bg-[#f0f4f8] text-left transition-colors"
       >
         <Badge variant={variant} className="mt-0.5 capitalize flex-shrink-0">
           {finding.severity}
         </Badge>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-200 truncate">{finding.name}</p>
+          <p className="text-sm font-medium text-slate-800 truncate">{finding.name}</p>
           <p className="text-xs text-slate-500 font-mono truncate mt-0.5">
             {finding.matched_at || finding.host}
           </p>
@@ -751,15 +751,15 @@ function FindingCard({ finding }: { finding: NucleiFinding }) {
       </button>
 
       {open && (
-        <div className="px-4 py-3 space-y-3 bg-slate-900/50 text-xs">
+        <div className="px-4 py-3 space-y-3 bg-[#f5f7fa] text-xs">
           {finding.description && (
-            <p className="text-slate-300 leading-relaxed">{finding.description}</p>
+            <p className="text-slate-600 leading-relaxed">{finding.description}</p>
           )}
           <div className="flex flex-wrap gap-2">
             {finding.tags.map((tag) => (
               <span
                 key={tag}
-                className="bg-slate-700 text-slate-300 px-2 py-0.5 rounded text-[10px]"
+                className="bg-[#e8edf5] text-slate-600 px-2 py-0.5 rounded text-[10px]"
               >
                 {tag}
               </span>
@@ -844,7 +844,7 @@ function ZapPanel({ data }: { data: Record<string, unknown> | null }) {
           { label: "High",          key: "High",          color: "text-red-400",    bg: "bg-red-400/10"    },
           { label: "Medium",        key: "Medium",        color: "text-yellow-400", bg: "bg-yellow-400/10" },
           { label: "Low",           key: "Low",           color: "text-blue-400",   bg: "bg-blue-400/10"   },
-          { label: "Informational", key: "Informational", color: "text-slate-400",  bg: "bg-slate-700/50"  },
+          { label: "Informational", key: "Informational", color: "text-[#64748b]",  bg: "bg-[#e8f4f8]"    },
         ].map(({ label, key, color, bg }) => (
           <div key={key} className={`${bg} rounded-lg p-3 text-center`}>
             <p className={`text-2xl font-bold ${color}`}>{by_risk[key] ?? 0}</p>
@@ -876,16 +876,16 @@ function AlertCard({ alert }: { alert: ZapAlert }) {
   const variant = RISK_VARIANT[alert.risk] ?? "secondary";
 
   return (
-    <div className="border border-slate-700 rounded-lg overflow-hidden">
+    <div className="border border-[#e5e7eb] rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-start gap-3 px-4 py-3 bg-slate-800/40 hover:bg-slate-800 text-left transition-colors"
+        className="w-full flex items-start gap-3 px-4 py-3 bg-[#f9f9ff] hover:bg-[#f0f4f8] text-left transition-colors"
       >
         <Badge variant={variant} className="mt-0.5 flex-shrink-0 capitalize">
           {alert.risk}
         </Badge>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-200 truncate">{alert.name}</p>
+          <p className="text-sm font-medium text-slate-800 truncate">{alert.name}</p>
           <p className="text-xs text-slate-500 mt-0.5">
             {alert.count} instance{alert.count !== 1 ? "s" : ""}
             {alert.cwe_id ? ` · CWE-${alert.cwe_id}` : ""}
@@ -902,11 +902,11 @@ function AlertCard({ alert }: { alert: ZapAlert }) {
       </button>
 
       {open && (
-        <div className="px-4 py-3 space-y-3 bg-slate-900/50 text-xs">
+        <div className="px-4 py-3 space-y-3 bg-[#f5f7fa] text-xs">
           {alert.description && (
             <div>
               <p className="text-slate-500 font-semibold mb-1">Description</p>
-              <p className="text-slate-300 leading-relaxed">
+              <p className="text-slate-700 leading-relaxed">
                 {alert.description.replace(/<[^>]*>/g, "")}
               </p>
             </div>
@@ -914,7 +914,7 @@ function AlertCard({ alert }: { alert: ZapAlert }) {
           {alert.solution && (
             <div>
               <p className="text-slate-500 font-semibold mb-1">Solution</p>
-              <p className="text-slate-300 leading-relaxed">
+              <p className="text-slate-700 leading-relaxed">
                 {alert.solution.replace(/<[^>]*>/g, "")}
               </p>
             </div>
@@ -926,16 +926,16 @@ function AlertCard({ alert }: { alert: ZapAlert }) {
               </p>
               <div className="space-y-1">
                 {alert.instances.map((inst, i) => (
-                  <div key={i} className="bg-slate-900 rounded p-2">
+                  <div key={i} className="bg-white border border-[#e5e7eb] rounded p-2">
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary" className="text-[9px] font-mono flex-shrink-0">
                         {inst.method}
                       </Badge>
-                      <span className="text-cyan-400 font-mono truncate">{inst.uri}</span>
+                      <span className="text-blue-600 font-mono truncate">{inst.uri}</span>
                     </div>
                     {inst.param && (
-                      <p className="text-slate-500 mt-1">
-                        Param: <span className="text-slate-300">{inst.param}</span>
+                      <p className="text-slate-600 mt-1">
+                        Param: <span className="text-slate-800 font-medium">{inst.param}</span>
                       </p>
                     )}
                     {inst.evidence && (
@@ -975,7 +975,7 @@ function FfufPanel({ data }: { data: Record<string, unknown> | null }) {
     if (s === 301 || s === 302 || s === 307) return "text-blue-400";
     if (s === 401 || s === 403) return "text-yellow-400";
     if (s === 500) return "text-red-400";
-    return "text-slate-400";
+    return "text-slate-600";
   };
 
   return (
@@ -983,7 +983,7 @@ function FfufPanel({ data }: { data: Record<string, unknown> | null }) {
       {!!data.error && <ErrorBanner message={`Error: ${String(data.error)}`} />}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {Object.entries(byStatus).map(([status, count]) => (
-          <div key={status} className="bg-slate-800 rounded-lg p-3 text-center">
+          <div key={status} className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg p-3 text-center">
             <p className={`text-2xl font-bold ${statusColor(Number(status))}`}>{count}</p>
             <p className="text-xs text-slate-500 mt-0.5">HTTP {status}</p>
           </div>
@@ -1007,8 +1007,8 @@ function FfufPanel({ data }: { data: Record<string, unknown> | null }) {
             {endpoints.map((ep, i) => (
               <div key={i} className="flex items-center gap-2 text-xs font-mono">
                 <span className={`w-10 text-center rounded px-1 ${statusColor(Number(ep.status))} bg-slate-900`}>{String(ep.status)}</span>
-                <span className="text-slate-300 truncate">{String(ep.url)}</span>
-                <span className="text-slate-600 flex-shrink-0">{String(ep.length)}b</span>
+                <span className="text-slate-700 truncate">{String(ep.url)}</span>
+                <span className="text-slate-500 flex-shrink-0">{String(ep.length)}b</span>
               </div>
             ))}
           </div>
@@ -1034,11 +1034,11 @@ function SqlmapPanel({ data }: { data: Record<string, unknown> | null }) {
   // SQLMap was skipped (no injectable params detected by ZAP)
   if (data.skipped) {
     return (
-      <div className="flex items-center gap-3 p-4 rounded-lg border bg-slate-800/50 border-slate-700">
+      <div className="flex items-center gap-3 p-4 rounded-lg border bg-[#f5f7fa] border-[#e5e7eb]">
         <Filter className="h-5 w-5 text-slate-500 flex-shrink-0" />
         <div>
-          <p className="text-sm font-semibold text-slate-400">SQLMap non exécuté</p>
-          <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+          <p className="text-sm font-semibold text-slate-700">SQLMap non exécuté</p>
+          <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
             {String(data.reason ?? "Aucun paramètre injectable détecté par ZAP — SQLMap skippé (réduction de faux positifs).")}
           </p>
         </div>
@@ -1069,11 +1069,11 @@ function SqlmapPanel({ data }: { data: Record<string, unknown> | null }) {
         <div key={i} className="border border-red-500/20 rounded-lg p-4 bg-red-500/5 space-y-2">
           <div className="flex items-center gap-2">
             <Badge variant="danger">CWE-89</Badge>
-            <span className="text-sm font-medium text-slate-200">
-              Parameter: <span className="font-mono text-red-400">{String(f.parameter)}</span>
+            <span className="text-sm font-medium text-slate-800">
+              Parameter: <span className="font-mono text-red-500">{String(f.parameter)}</span>
             </span>
           </div>
-          <p className="text-xs text-slate-400">{String(f.technique)}</p>
+          <p className="text-xs text-slate-600">{String(f.technique)}</p>
           <p className="text-xs text-slate-500 font-mono bg-slate-900 rounded p-2 truncate">
             {String(f.payload_example || "")}
           </p>
@@ -1117,21 +1117,21 @@ function GitleaksPanel({ data }: { data: Record<string, unknown> | null }) {
       )}
       <div className="space-y-2">
         {findings.map((f, i) => (
-          <div key={i} className="border border-slate-700 rounded-lg p-3 space-y-2">
+          <div key={i} className="border border-[#e5e7eb] rounded-lg p-3 space-y-2 bg-white">
             <div className="flex items-start gap-2">
               <Badge variant={SEVERITY_VARIANT[String(f.severity)] ?? "secondary"} className="capitalize flex-shrink-0">
                 {String(f.severity)}
               </Badge>
               <div>
-                <p className="text-xs font-mono text-slate-300">{String(f.rule_id)}</p>
+                <p className="text-xs font-mono text-slate-700">{String(f.rule_id)}</p>
                 <p className="text-xs text-slate-500 mt-0.5">{String(f.description)}</p>
               </div>
             </div>
-            <p className="text-xs text-slate-400 truncate font-mono">{String(f.file)}</p>
+            <p className="text-xs text-slate-600 truncate font-mono">{String(f.file)}</p>
             <p className="text-xs bg-slate-900 rounded p-2 font-mono text-orange-400 truncate">
               {String(f.match || "")}
             </p>
-            <p className="text-xs text-slate-600">Secret: <span className="text-slate-400">{String(f.secret)}</span></p>
+            <p className="text-xs text-slate-600">Secret: <span className="text-slate-700 font-medium">{String(f.secret)}</span></p>
           </div>
         ))}
       </div>
@@ -1180,16 +1180,16 @@ function CorrelationPanel({ data }: { data: Record<string, unknown> | null }) {
         <div className="space-y-2">
           {findings.length === 0 && <EmptyState message="No correlated findings." />}
           {findings.map((f, i) => (
-            <div key={i} className="border border-slate-700 rounded-lg p-3 space-y-1">
+            <div key={i} className="border border-[#e5e7eb] rounded-lg p-3 space-y-1 bg-[#f9f9ff]">
               <div className="flex items-center gap-2">
                 <Badge variant={SEVERITY_VARIANT[String(f.severity)?.toLowerCase()] ?? "secondary"} className="capitalize">
                   {String(f.severity)}
                 </Badge>
-                <span className="text-sm text-slate-200">{String(f.title)}</span>
+                <span className="text-sm text-slate-800">{String(f.title)}</span>
               </div>
               <div className="flex gap-2 flex-wrap">
                 {(f.sources as string[] || []).map((s) => (
-                  <span key={s} className="text-[10px] bg-slate-700 text-slate-300 px-1.5 rounded">{s}</span>
+                  <span key={s} className="text-[10px] bg-[#e8edf5] text-slate-600 px-1.5 rounded">{s}</span>
                 ))}
                 <span className="text-[10px] text-slate-500">
                   Confidence: {typeof f.confidence_score === "number" ? `${Math.round(f.confidence_score * 100)}%` : String(f.confidence_score)}
@@ -1215,16 +1215,16 @@ function FpReductionPanel({ data }: { data: Record<string, unknown> | null }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-slate-800 rounded-lg p-4 text-center">
-          <p className="text-3xl font-bold text-slate-200">{String(data.original_count ?? 0)}</p>
+        <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg p-4 text-center">
+          <p className="text-3xl font-bold text-slate-800">{String(data.original_count ?? 0)}</p>
           <p className="text-xs text-slate-500 mt-1">Original</p>
         </div>
-        <div className="bg-slate-800 rounded-lg p-4 text-center">
-          <p className="text-3xl font-bold text-green-400">{String(data.final_count ?? 0)}</p>
+        <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg p-4 text-center">
+          <p className="text-3xl font-bold text-green-600">{String(data.final_count ?? 0)}</p>
           <p className="text-xs text-slate-500 mt-1">After Filter</p>
         </div>
-        <div className="bg-slate-800 rounded-lg p-4 text-center">
-          <p className="text-3xl font-bold text-orange-400">{Math.round(rate * 100)}%</p>
+        <div className="bg-[#f5f7fa] border border-[#e5e7eb] rounded-lg p-4 text-center">
+          <p className="text-3xl font-bold text-orange-500">{Math.round(rate * 100)}%</p>
           <p className="text-xs text-slate-500 mt-1">Reduction</p>
         </div>
       </div>
@@ -1232,15 +1232,15 @@ function FpReductionPanel({ data }: { data: Record<string, unknown> | null }) {
         <div className="space-y-2">
           {Object.entries(byLayer).map(([layer, count]) => (
             <div key={layer} className="flex items-center justify-between">
-              <span className="text-xs text-slate-400 capitalize">{layer.replace(/_/g, " ")}</span>
+              <span className="text-xs text-slate-600 capitalize">{layer.replace(/_/g, " ")}</span>
               <div className="flex items-center gap-2">
-                <div className="w-32 bg-slate-700 rounded-full h-1.5">
+                <div className="w-32 bg-[#e5e7eb] rounded-full h-1.5">
                   <div
                     className="bg-orange-400 h-1.5 rounded-full"
                     style={{ width: `${Math.min(100, count * 20)}%` }}
                   />
                 </div>
-                <span className="text-xs text-slate-300 w-4 text-right">{count}</span>
+                <span className="text-xs text-slate-700 w-4 text-right">{count}</span>
               </div>
             </div>
           ))}
@@ -1262,8 +1262,8 @@ function AiAnalysisPanel({ data }: { data: Record<string, unknown> | null }) {
         <Sparkles className="h-8 w-8 text-slate-600 mx-auto" />
         <p className="text-sm text-slate-500">AI Analysis is disabled.</p>
         <p className="text-xs text-slate-600">
-          Set <code className="bg-slate-800 px-1 rounded">GEMINI_API_KEY</code> and{" "}
-          <code className="bg-slate-800 px-1 rounded">AI_ANALYSIS_ENABLED=true</code> in your .env file.
+          Set <code className="bg-[#e8edf5] text-slate-700 px-1 rounded">GEMINI_API_KEY</code> and{" "}
+          <code className="bg-[#e8edf5] text-slate-700 px-1 rounded">AI_ANALYSIS_ENABLED=true</code> in your .env file.
         </p>
       </div>
     );
@@ -1288,16 +1288,16 @@ function AiAnalysisPanel({ data }: { data: Record<string, unknown> | null }) {
       <div className="bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 rounded-xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <Sparkles className="h-4 w-4 text-cyan-400" />
-          <span className="text-xs text-slate-400">Model: {String(data.model_used || "Claude")}</span>
+          <span className="text-xs text-slate-600">Model: {String(data.model_used || "Claude")}</span>
           {!!data.risk_level && (
             <Badge variant={SEVERITY_VARIANT[String(data.risk_level).toLowerCase()] ?? "secondary"} className="ml-auto">
               {String(data.risk_level)}
             </Badge>
           )}
         </div>
-        <p className="text-sm text-slate-200 leading-relaxed">{String(data.executive_summary || "")}</p>
+        <p className="text-sm text-slate-800 leading-relaxed">{String(data.executive_summary || "")}</p>
         {!!data.risk_justification && (
-          <p className="text-xs text-slate-500 mt-2">{String(data.risk_justification)}</p>
+          <p className="text-xs text-slate-600 mt-2">{String(data.risk_justification)}</p>
         )}
       </div>
 
@@ -1305,15 +1305,15 @@ function AiAnalysisPanel({ data }: { data: Record<string, unknown> | null }) {
         <Section title="Top Vulnerabilities">
           <div className="space-y-3">
             {topVulns.map((v, i) => (
-              <div key={i} className="border border-slate-700 rounded-lg p-3 space-y-1">
+              <div key={i} className="border border-[#e5e7eb] rounded-lg p-3 space-y-1 bg-[#f9f9ff]">
                 <div className="flex items-center gap-2">
                   <Badge variant={v.priority === "immediate" ? "danger" : "warning"} className="text-[10px]">
                     {String(v.priority || "short-term")}
                   </Badge>
-                  <p className="text-sm font-medium text-slate-200">{String(v.title)}</p>
+                  <p className="text-sm font-medium text-slate-800">{String(v.title)}</p>
                 </div>
-                <p className="text-xs text-slate-400"><span className="text-slate-500">Impact:</span> {String(v.impact)}</p>
-                <p className="text-xs text-slate-400"><span className="text-slate-500">Fix:</span> {String(v.remediation)}</p>
+                <p className="text-xs text-slate-600"><span className="text-slate-500">Impact:</span> {String(v.business_impact ?? v.impact ?? "")}</p>
+                <p className="text-xs text-slate-600"><span className="text-slate-500">Fix:</span> {String(v.remediation)}</p>
               </div>
             ))}
           </div>
@@ -1324,8 +1324,8 @@ function AiAnalysisPanel({ data }: { data: Record<string, unknown> | null }) {
         <Section title="Immediate Actions">
           <ul className="space-y-1.5">
             {actions.map((a, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
-                <span className="text-red-400 flex-shrink-0 mt-0.5">→</span>
+              <li key={i} className="flex items-start gap-2 text-xs text-slate-700">
+                <span className="text-red-500 flex-shrink-0 mt-0.5">→</span>
                 {a}
               </li>
             ))}
@@ -1337,8 +1337,8 @@ function AiAnalysisPanel({ data }: { data: Record<string, unknown> | null }) {
         <Section title="Recommendations" defaultOpen={false}>
           <ul className="space-y-1.5">
             {recs.map((r, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
-                <span className="text-cyan-400 flex-shrink-0 mt-0.5">•</span>
+              <li key={i} className="flex items-start gap-2 text-xs text-slate-700">
+                <span className="text-blue-500 flex-shrink-0 mt-0.5">•</span>
                 {r}
               </li>
             ))}
@@ -1348,7 +1348,7 @@ function AiAnalysisPanel({ data }: { data: Record<string, unknown> | null }) {
 
       {!!data.compliance_notes && (
         <Section title="Compliance Notes" defaultOpen={false}>
-          <p className="text-xs text-slate-400">{String(data.compliance_notes)}</p>
+          <p className="text-xs text-slate-600">{String(data.compliance_notes)}</p>
         </Section>
       )}
     </div>
@@ -1409,12 +1409,12 @@ export default function ScanResults({ scan }: ScanResultsProps) {
       <PipelineOverview scan={scan} />
 
       <Tabs defaultValue={defaultTab} className="w-full">
-        <TabsList className="bg-slate-800 border border-slate-700 h-auto p-1 gap-1 flex-wrap">
+        <TabsList className="bg-[#f5f7fa] border border-[#e5e7eb] h-auto p-1 gap-1 flex-wrap">
           {tabs.map(({ id, label, icon: Icon, dataKey, badge }) => (
             <TabsTrigger
               key={id}
               value={id}
-              className="data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100 text-slate-400 gap-1.5 px-3 py-2"
+              className="data-[state=active]:bg-white data-[state=active]:text-slate-900 text-slate-600 gap-1.5 px-3 py-2"
             >
               <Icon className="h-3.5 w-3.5" />
               {label}

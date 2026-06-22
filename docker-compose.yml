@@ -239,6 +239,21 @@ services:
       retries: 3
       start_period: 45s
 
+  # ── IDOR Tester — Broken Access Control / Cross-account Testing ──────────
+  idor:
+    build:
+      context: ./idor
+    image: auditscan-idor:dev
+    restart: unless-stopped
+    networks:
+      - auditscan_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9012/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
   # ── Trivy — Supply Chain / Container Scanner ──────────────────────────────
   trivy:
     build:
@@ -285,6 +300,7 @@ services:
       GITLEAKS_URL:  http://gitleaks:9008
       NIKTO_URL:     http://nikto:9010
       WAPITI_URL:    http://wapiti:9011
+      IDOR_URL:      http://idor:9012
     depends_on:
       postgres:
         condition: service_healthy
@@ -330,6 +346,7 @@ services:
       KATANA_URL:    http://katana:9009
       NIKTO_URL:     http://nikto:9010
       WAPITI_URL:    http://wapiti:9011
+      IDOR_URL:      http://idor:9012
       WORKER_TYPE:   fast
     deploy:
       resources:
@@ -373,6 +390,7 @@ services:
       KATANA_URL:    http://katana:9009
       NIKTO_URL:     http://nikto:9010
       WAPITI_URL:    http://wapiti:9011
+      IDOR_URL:      http://idor:9012
       WORKER_TYPE:   slow
     deploy:
       resources:
