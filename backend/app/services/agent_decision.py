@@ -167,6 +167,17 @@ _PHP_KW:       List[str] = ["php", "laravel", "symfony", "wordpress", "drupal", 
 _JAVA_KW:      List[str] = ["java", "spring", "tomcat", "jetty", "jboss", "wildfly"]
 _CONTAINER_KW: List[str] = ["docker", "container", "k8s", "kubernetes", "alpine", "debian", "ubuntu"]
 _NODE_KW:      List[str] = ["node", "express", "koa", "fastify", "nestjs"]
+_DEVOPS_KW:    List[str] = ["jenkins", "gitlab", "jira", "confluence", "sonar", "nexus", "artifactory", "bamboo", "teamcity"]
+_CMS_KW:       List[str] = ["wordpress", "drupal", "joomla", "typo3", "magento", "prestashop"]
+_APACHE_KW:    List[str] = ["apache", "nginx", "lighttpd", "iis"]
+
+_PROFILE_CONFIG: Dict[str, Any] = {
+    "web_spa":         {"nuclei_tags": ["xss", "cors", "headers", "exposure", "misconfig", "token", "swagger", "unauth"], "nuclei_timeout": 120, "dalfox_timeout": 0, "ffuf_timeout": 90},
+    "web_traditional": {"nuclei_tags": ["sqli", "lfi", "rce", "misconfig", "exposure"],       "nuclei_timeout": 180, "dalfox_timeout": 200, "ffuf_timeout": 120},
+    "devops_tool":     {"nuclei_tags": ["panel", "unauth", "exposure", "token", "misconfig"], "nuclei_timeout": 180, "dalfox_timeout": 0,   "ffuf_timeout": 90},
+    "cms":             {"nuclei_tags": ["wordpress", "drupal", "sqli", "xss", "exposure"],    "nuclei_timeout": 180, "dalfox_timeout": 180, "ffuf_timeout": 90},
+    "web_generic":     {"nuclei_tags": ["cors", "csp", "headers", "unauth", "sqli", "xss"],  "nuclei_timeout": 150, "dalfox_timeout": 150, "ffuf_timeout": 90},
+}
 
 
 def _select_probe_packs(
@@ -235,13 +246,29 @@ def _select_probe_packs(
     }
 
 
+def _detect_target_profile(ctx: Dict[str, Any]) -> str:
+    """Classifies the target into a scan profile from detected tech stack."""
+    blob  = ctx["blob"]
+    ports = ctx["ports"]
+    if any(k in blob for k in _DEVOPS_KW):
+        return "devops_tool"
+    if any(k in blob for k in _CMS_KW):
+        return "cms"
+    if (any(k in blob for k in _NODE_KW + _SPA_KW)
+            or any(p in _SPA_PORTS for p in ports)):
+        return "web_spa"
+    if any(k in blob for k in _APACHE_KW + _PHP_KW + _JAVA_KW):
+        return "web_traditional"
+    return "web_generic"
+
+
 def _rule_based_decision(
     target: str,
     ctx: Dict[str, Any],
     is_private: bool,
+    status_code: int = 0,
 ) -> Dict[str, Any]:
     skip:     Dict[str, str] = {}
-    tags:     List[str]      = ["exposure", "misconfig", "xss", "sqli", "unauth", "panel", "discovery", "tech", "headers", "cors", "csp", "redirect"]
     ajax:     bool           = False
     priority: str            = "web"
 
@@ -249,6 +276,24 @@ def _rule_based_decision(
     ports       = list(ctx["ports"])   # mutable copy -- may be extended by URL inference
     http_titles = ctx.get("http_titles", [])
     titles_blob = " ".join(http_titles)
+
+    # -- RULE 1: Target profile detection --------------------------------------
+    profile  = _detect_target_profile(ctx)
+    prof_cfg = _PROFILE_CONFIG[profile]
+    tags: List[str] = list(prof_cfg["nuclei_tags"])
+    logger.info("[AgentDecide] Target profile: %s | nuclei_tags=%s", profile, tags)
+
+    # -- Juice Shop / OWASP detection -> override nuclei_tags ------------------
+    _titles_lower = titles_blob.lower()
+    _is_juiceshop = (
+        "juice shop" in _titles_lower
+        or "owasp" in _titles_lower
+        or "juiceshop" in blob.lower()
+        or (profile == "web_spa" and 3000 in ports)
+    )
+    if _is_juiceshop:
+        tags = ["exposure", "misconfig", "sqli", "token", "swagger", "xss", "cors", "unauth", "redirect"]
+        logger.info("[AgentDecide] Juice Shop detected -- nuclei_tags overridden for OWASP app profile")
 
     # -- URL-based port inference ----------------------------------------------
     # Nmap can return 0 ports for Docker-internal targets (DNS not ready yet,
@@ -339,7 +384,17 @@ def _rule_based_decision(
         skip["sqlmap"] = "No injectable parameters expected on pure network target"
         skip["dalfox"] = "No web forms expected on pure network target"
 
-    # ---- Rule 9 -- Trivy : skip silencieux tant que non integre dans scan_tasks.py ------------
+    # -- RULE 2: Smart skip -- devops_tool profile -> skip dalfox (no forms) ----
+    if profile == "devops_tool" and "dalfox" not in skip:
+        skip["dalfox"] = "devops_tool profile -- no user input forms expected"
+        logger.info("[AGENT SKIP] dalfox: no forms detected in devops_tool profile -- dalfox not relevant")
+
+    # -- RULE 2: Smart skip -- WAF detected (HTTP 403) -> skip nuclei ----------
+    if status_code == 403 and "nuclei" not in skip:
+        skip["nuclei"] = "Target returned 403 (WAF detected) -- nuclei templates likely blocked"
+        logger.info("[AGENT SKIP] nuclei: target returned 403 (WAF) -- skipping nuclei")
+
+    # -- Rule 9: Trivy skip silencieux tant que non integre --------------------
     skip["trivy"] = "not yet integrated"
 
     tools_to_run = [t for t in ALL_TOOLS if t not in skip]
@@ -355,7 +410,45 @@ def _rule_based_decision(
         "priority":           priority,
         "probe_pack_ids":     _probe_sel["pack_ids"],
         "probe_pack_reasons": _probe_sel["reason"],
+        "target_profile":     profile,
+        "nuclei_timeout":     prof_cfg["nuclei_timeout"],
+        "dalfox_timeout":     prof_cfg["dalfox_timeout"],
+        "ffuf_timeout":       prof_cfg["ffuf_timeout"],
     }
+
+
+# -- JSON extraction -----------------------------------------------------------
+
+
+def _extract_json(text: str) -> dict:
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find('{')
+    if start == -1:
+        raise ValueError("No JSON object found in response")
+
+    depth = 0
+    for i, ch in enumerate(text[start:], start):
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                candidate = text[start:i+1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    break
+
+    clean = re.sub(r'```(?:json)?', '', text).strip()
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        raise ValueError("No valid JSON in Gemini response")
 
 
 # -- Gemini prompt -------------------------------------------------------------
@@ -367,61 +460,36 @@ def _build_prompt(
     is_private: bool,
 ) -> str:
     titles_str = ", ".join(ctx.get("http_titles", [])) or "none"
-    return f"""You are a cybersecurity orchestration agent for the AUDITSCANIA scanner.
-Analyze the target context and decide which security tools to run.
-
-## Available tools and their roles
-- subfinder  : subdomain/asset discovery
-- zap        : web active scanner (XSS, SQLi, CSRF on forms) -- use ajax_spider=true for SPA
-- nuclei     : CVE template scanner (always useful)
-- dalfox     : XSS parameter scanner
-- ffuf       : directory and endpoint fuzzer
-- sqlmap     : SQL injection exploitation
-- gitleaks   : secrets/credentials detection in responses
-- katana     : JS/SPA crawler (extracts hidden API endpoints)
-- nikto      : web server misconfig, backup files, admin panels
-- wapiti     : web app auditor (SQLi, XSS, CSRF, LFI, Open Redirect)
-- trivy      : CVE/SCA scanner for containers and dependencies
-
-## Tools NOT in this list (always run, never skip)
-nmap, shodan, abuseipdb, virustotal
-
-## Target context
-- Target: {target}
-- Private/internal hostname or IP: {is_private}
-- Open ports: {ctx['ports']}
-- Detected services: {ctx['services']}
-- Detected products: {ctx['products']}
-- Detected technologies: {ctx['techs']}
-- HTTP page titles: "{titles_str}"
-- HTTP Server header: "{ctx['server'] or 'none'}"
-- HTTP X-Powered-By: "{ctx['powered_by'] or 'none'}"
-
-## Mandatory rules (apply ALL without exception)
-1.  Private/internal hostname or IP -> skip "subfinder"
-2.  SQLite or ORM keywords (sequelize, typeorm, prisma, mongoose) -> skip "sqlmap"
-3.  Node.js WITHOUT a detected relational DB (MySQL/PostgreSQL/MSSQL) -> skip "sqlmap"
-4.  No GET/POST parameters expected (pure network, no HTTP) -> skip "sqlmap" AND "dalfox"
-5a. SPA framework detected in blob (Angular, React, Vue, Next.js, Nuxt, Juice Shop) -> zap_ajax=false (Katana handles JS crawl)
-5b. Port 3000/4200/5173 open with no explicit PHP/Java tech -> probably Node.js SPA -> zap_ajax=true
-6.  PHP detected (Laravel, Symfony, WordPress, Drupal, Joomla) -> keep "nikto" AND "wapiti", add php tags
-7.  MySQL or PostgreSQL detected -> keep "sqlmap" (overrides rules 2 and 3)
-8.  No web ports (80/443/8080/8443/3000/8000) -> skip "zap","dalfox","nikto","wapiti","ffuf","katana" -> priority="network"
-9.  Container/Docker/Alpine indicators -> keep "trivy"; otherwise skip "trivy"
-10. Page title contains "Juice Shop" or "OWASP" -> set zap_ajax=true, keep nikto+wapiti+dalfox
-
-## Output (JSON only -- no markdown, no explanation, no extra text)
-{{
-  "tools": ["list", "of", "tools", "to", "run"],
-  "skip": ["list", "of", "tools", "to", "skip"],
-  "reasons": {{"tool_name": "short reason why skipped"}},
-  "nuclei_tags": ["relevant", "nuclei", "tags"],
-  "zap_ajax": false,
-  "priority": "web"
-}}
-
-priority must be exactly one of: "web", "network", "api"
-Output valid JSON only, starting with {{ and ending with }}."""
+    return (
+        f"Target: {target}\n"
+        f"Private/internal: {is_private}\n"
+        f"Open ports: {ctx['ports']}\n"
+        f"Services: {ctx['services']}\n"
+        f"Technologies: {ctx['techs']}\n"
+        f"HTTP titles: {titles_str}\n"
+        f"Server header: {ctx['server'] or 'none'}\n"
+        f"X-Powered-By: {ctx['powered_by'] or 'none'}\n\n"
+        "Available tools: subfinder, zap, nuclei, dalfox, ffuf, sqlmap, gitleaks, katana, nikto, wapiti, trivy\n\n"
+        "Rules:\n"
+        "- Private/internal hostname -> skip subfinder\n"
+        "- ORM/SQLite detected -> skip sqlmap\n"
+        "- Node.js without relational DB -> skip sqlmap\n"
+        "- No web ports -> skip zap, dalfox, nikto, wapiti, ffuf, katana; priority=network\n"
+        "- PHP/WordPress detected -> keep nikto and wapiti\n"
+        "- MySQL/PostgreSQL detected -> keep sqlmap\n"
+        "- trivy: skip unless Docker/container detected\n\n"
+        "Return this JSON:\n"
+        "{\n"
+        '  "profile": "web_spa|web_traditional|devops_tool|cms|web_generic",\n'
+        '  "tools": ["tools to run"],\n'
+        '  "skip": ["tools to skip"],\n'
+        '  "nuclei_tags": ["tag1", "tag2"],\n'
+        '  "nuclei_timeout": 120,\n'
+        '  "dalfox_timeout": 0,\n'
+        '  "ffuf_timeout": 90,\n'
+        '  "reason": "one line explanation"\n'
+        "}"
+    )
 
 
 # -- Main entry point ----------------------------------------------------------
@@ -448,8 +516,9 @@ async def agent_decide(
     Note: nmap, shodan, abuseipdb, virustotal are NOT in ALL_TOOLS --
     they are always executed unconditionally in Phase 1.
     """
-    ctx        = _extract_tech_context(nmap_result, headers)
-    is_private = _is_private_ip(target)
+    ctx         = _extract_tech_context(nmap_result, headers)
+    is_private  = _is_private_ip(target)
+    status_code = int(headers.get("_status_code", 0) or 0)
 
     logger.info(
         "[AgentDecide] ctx -- ports=%s services=%s techs=%s titles=%s server='%s' powered_by='%s'",
@@ -457,7 +526,7 @@ async def agent_decide(
         ctx.get("http_titles", []), ctx["server"], ctx["powered_by"],
     )
 
-    rule_decision = _rule_based_decision(target, ctx, is_private)
+    rule_decision = _rule_based_decision(target, ctx, is_private, status_code=status_code)
 
     api_key = settings.GEMINI_API_KEY
     if not api_key or not settings.AI_ANALYSIS_ENABLED:
@@ -469,10 +538,19 @@ async def agent_decide(
     model   = getattr(settings, "AI_MODEL", None) or "gemini-2.5-flash"
     url     = f"{GEMINI_BASE}/{model}:generateContent?key={api_key}"
     payload = {
+        "systemInstruction": {
+            "parts": [{"text": (
+                "You are a security scan decision engine. "
+                "Respond ONLY with a single valid JSON object. "
+                "No markdown. No code blocks. No explanation. "
+                "The JSON must be complete and properly closed."
+            )}],
+        },
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature":     0.0,
-            "maxOutputTokens": 1024,
+            "temperature":      0.1,
+            "maxOutputTokens":  512,
+            "responseMimeType": "application/json",
         },
     }
 
@@ -488,10 +566,15 @@ async def agent_decide(
                 .get("parts", [{}])[0]
                 .get("text", "")
         )
-        clean    = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
-        decision = json.loads(clean)
+        logger.debug("[AgentDecide] Gemini raw response (first 200 chars): %s", raw[:200])
+        decision = _extract_json(raw)
 
-        required = {"tools", "skip", "reasons", "nuclei_tags", "zap_ajax", "priority"}
+        # Set defaults for fields not in the simplified prompt schema
+        decision.setdefault("reasons", {})
+        decision.setdefault("zap_ajax", False)
+        decision.setdefault("priority", "web")
+
+        required = {"tools", "skip", "nuclei_tags"}
         missing  = required - decision.keys()
         if missing:
             raise ValueError(f"Missing keys in Gemini response: {missing}")
@@ -543,6 +626,18 @@ async def agent_decide(
         decision["probe_pack_ids"]     = _probe_sel["pack_ids"]
         decision["probe_pack_reasons"] = _probe_sel["reason"]
 
+        # Hard-rule G -- Target profile + timeouts (always override Gemini)
+        _prof     = _detect_target_profile(ctx)
+        _prof_cfg = _PROFILE_CONFIG.get(_prof, _PROFILE_CONFIG["web_generic"])
+        decision["target_profile"] = _prof
+        decision["nuclei_timeout"] = _prof_cfg["nuclei_timeout"]
+        decision["dalfox_timeout"] = _prof_cfg["dalfox_timeout"]
+        decision["ffuf_timeout"]   = _prof_cfg["ffuf_timeout"]
+        if _prof == "devops_tool" and "dalfox" not in decision.get("skip", []):
+            decision["skip"].append("dalfox")
+            decision["reasons"]["dalfox"] = "devops_tool profile -- no user input forms expected"
+            decision["tools"] = [t for t in decision["tools"] if t != "dalfox"]
+
         decision["source"] = "gemini"
         logger.info(
             "[AgentDecide] Gemini OK -- target=%s tools=%s skip=%s priority=%s ajax=%s probe_packs=%s",
@@ -559,6 +654,31 @@ async def agent_decide(
         logger.warning("[AgentDecide] Gemini HTTP error (%s) -- rule-based fallback", exc)
     except Exception as exc:
         logger.warning("[AgentDecide] Gemini unexpected error (%s) -- rule-based fallback", exc)
+
+    # Enhanced skip rules for fallback path
+    _fb_profile  = _detect_target_profile(ctx)
+    _dalfox_skip = _fb_profile in ("web_spa", "devops_tool") or not ctx.get("has_forms", False)
+    _sqlmap_skip = (_fb_profile == "devops_tool")
+
+    _new_skips: List[str] = []
+    if _dalfox_skip and "dalfox" not in rule_decision.get("skip", []):
+        _new_skips.append("dalfox")
+    if _sqlmap_skip and "sqlmap" not in rule_decision.get("skip", []):
+        _new_skips.append("sqlmap")
+    if is_private and "subfinder" not in rule_decision.get("skip", []):
+        _new_skips.append("subfinder")
+
+    if _new_skips:
+        rule_decision["skip"]  = list(set(rule_decision.get("skip", [])) | set(_new_skips))
+        rule_decision["tools"] = [t for t in rule_decision.get("tools", []) if t not in set(_new_skips)]
+
+    rule_decision["dalfox_skip"]    = _dalfox_skip
+    rule_decision["dalfox_timeout"] = 0 if _dalfox_skip else rule_decision.get("dalfox_timeout", 300)
+    rule_decision["profile"]        = _fb_profile
+
+    for tool in _new_skips:
+        logger.info("[AGENT SKIP] %s: rule-based skip for profile=%s", tool, _fb_profile)
+    logger.info("[AGENT DECISION] profile=%s | skipped=%s", _fb_profile, rule_decision.get("skip", []))
 
     rule_decision["source"] = "rule-based-fallback"
     return rule_decision

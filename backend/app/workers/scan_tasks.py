@@ -519,7 +519,7 @@ async def _call_dalfox(
     if auth_headers:
         payload["auth_headers"] = auth_headers
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(float(timeout + 30))) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(float(timeout), connect=30.0)) as client:
             resp = await client.post(
                 f"{settings.DALFOX_URL}/scan",
                 json=payload,
@@ -1095,13 +1095,14 @@ async def _fetch_server_tags(target: str, timeout: int = 8) -> Dict[str, Any]:
     injoignable ou ne renvoie aucun header de techno.
     """
     url = target if target.startswith(("http://", "https://")) else f"http://{target}"
-    out: Dict[str, Any] = {"tags": [], "server": "", "powered_by": "", "tech": []}
+    out: Dict[str, Any] = {"tags": [], "server": "", "powered_by": "", "tech": [], "status_code": 0}
     tags: set = set(_ALWAYS_INCLUDE_TAGS)
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(float(timeout + 10)), verify=False, follow_redirects=True,
         ) as client:
             resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AuditScan/3.0)"})
+        out["status_code"] = resp.status_code
         h          = resp.headers
         server     = h.get("server", "")
         powered_by = h.get("x-powered-by", "")
@@ -1916,8 +1917,9 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             _add_log(db, scan_id, "[P1.2] Server detection: aucun header serveur expose")
 
         _agent_headers: Dict[str, str] = {
-            "server":       server_tags_info.get("server", ""),
-            "x-powered-by": server_tags_info.get("powered_by", ""),
+            "server":        server_tags_info.get("server", ""),
+            "x-powered-by":  server_tags_info.get("powered_by", ""),
+            "_status_code":  str(server_tags_info.get("status_code", 0)),
         }
         try:
             from app.services.agent_decision import agent_decide as _agent_decide
@@ -1960,6 +1962,17 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             _add_log(db, scan_id,
                      "[ProbePacks] No pack selected by agent -- fallback generic_rest_api will be used")
         ctx.save_step_result("agent_decision", agent_decision)
+        _est_time = (
+            "4-6min"  if agent_decision.get("target_profile") == "web_spa"
+            else "6-8min" if agent_decision.get("target_profile") == "web_generic"
+            else "8-12min"
+        )
+        _add_log(db, scan_id,
+                 f"[AGENT DECISION] profile={agent_decision.get('target_profile', 'unknown')} | "
+                 f"tools={','.join(sorted(tools_to_run))} | "
+                 f"skipped={','.join(agent_decision.get('skip', [])) or 'none'} | "
+                 f"nuclei_timeout={agent_decision.get('nuclei_timeout', 180)}s | "
+                 f"estimated_scan_time={_est_time}")
 
         # PHASE 1.5  --  AUTH DETECTION
         _add_log(db, scan_id,
@@ -2068,7 +2081,7 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
         # Fix 3: Nuclei quick scan mode -- reduce scope when no targeted CVEs detected
         # Avoids loading 1400+ generic templates on a SPA/Node.js target with no known CVEs.
         _nuclei_severity = "info,low,medium,high,critical"
-        _NUCLEI_QUICK_TAGS = ["exposure", "misconfig", "headers", "csp", "cors", "tech", "discovery"]
+        _NUCLEI_QUICK_TAGS = ["cors", "csp", "discovery", "exposure", "headers", "misconfig", "panel", "redirect", "sqli", "swagger", "tech", "token", "unauth", "xss"]
         if not nuclei_ctx["template_ids"] and len(nuclei_ctx["tags"]) > 8:
             nuclei_ctx["tags"] = _NUCLEI_QUICK_TAGS
             _nuclei_severity   = "medium,high,critical"
@@ -2113,17 +2126,30 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                         "by_severity": {}, "error": None,
                         "reason": agent_decision["reasons"].get("nuclei", "skipped by agent decision"),
                     }
-                return await _call_nuclei(
-                    target,
-                    templates       = _nuclei_templates or None,
-                    tags            = nuclei_ctx["tags"] or None,
-                    extra_targets   = None,
-                    tech_stack      = tech_stack or None,
-                    scan_categories = scan_cats or None,
-                    auth_headers    = _auth_h,
-                    auth_cookies    = _auth_c,
-                    severity        = _nuclei_severity,
-                )
+                _nuclei_default = {
+                    "target": target, "error": None, "findings": [], "total": 0,
+                    "by_severity": {}, "max_cvss": None, "templates_used": [], "tags_used": [],
+                }
+                try:
+                    return await asyncio.wait_for(
+                        _call_nuclei(
+                            target,
+                            templates       = _nuclei_templates or None,
+                            tags            = nuclei_ctx["tags"] or None,
+                            extra_targets   = None,
+                            tech_stack      = tech_stack or None,
+                            scan_categories = scan_cats or None,
+                            auth_headers    = _auth_h,
+                            auth_cookies    = _auth_c,
+                            severity        = _nuclei_severity,
+                        ),
+                        timeout=180,
+                    )
+                except asyncio.TimeoutError:
+                    _add_log(db, scan_id,
+                             "[P2] Nuclei: TIMEOUT after 3min -- results may be partial",
+                             level="warning")
+                    return {**_nuclei_default, "error": "Nuclei timeout after 180s"}
 
             async def _p2_ffuf():
                 if "ffuf" not in tools_to_run:
@@ -2135,8 +2161,10 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 # Delai initial : laisse Nuclei charger ses templates (20s) avant de
                 # demarrer FFUF -- reduit la contention HTTP sur la cible au demarrage.
                 await asyncio.sleep(20)
+                _ffuf_t = agent_decision.get("ffuf_timeout") or 90
+                _add_log(db, scan_id, f"[P2] FFUF rapide: timeout={_ffuf_t}s", level="info")
                 return await _call_ffuf(
-                    target, timeout=60, wordlist="fallback",
+                    target, timeout=_ffuf_t, wordlist="fallback",
                     auth_headers=_auth_h, auth_cookies=_auth_c,
                 )
 
@@ -2151,8 +2179,9 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
                 await asyncio.sleep(20)
                 logger.info("[Dalfox] Phase 2 parallel -- using %d generic fallback URLs",
                             len(_dalfox_fallback_urls))
+                _dalfox_t = agent_decision.get("dalfox_timeout") or 300
                 return await _call_dalfox(
-                    target, timeout=180, urls=_dalfox_fallback_urls, auth_headers=_auth_h or None,
+                    target, timeout=_dalfox_t, urls=_dalfox_fallback_urls, auth_headers=_auth_h or None,
                 )
 
             _r2 = await asyncio.gather(
@@ -2622,6 +2651,14 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
             async def _p3b_sqlmap():
                 if "sqlmap" not in tools_to_run:
                     return _sqlmap_skip_agent
+                _has_params = bool(
+                    zap_get_param_eps or zap_form_params or ffuf_get_param_eps or katana_param_eps
+                )
+                if not _has_params:
+                    _add_log(db, scan_id,
+                             "[P3] SQLMap: SKIPPED -- no injectable parameters detected (saved ~5min)",
+                             level="info")
+                    return _sqlmap_skip_noparams
                 await _wait_for_target(target)
                 return await _call_sqlmap_enriched(
                     target, zap_result, ffuf_result, katana_result,
@@ -2881,6 +2918,11 @@ def run_scan(self, scan_id: str, credentials: Optional[Dict[str, Any]] = None, l
 
         # a"EURa"EUR 4c: Risk Scoring a"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EURa"EUR
         _add_log(db, scan_id, "[P4] Calcul du risk score multi-facteurs...")
+        _nuclei_for_score = ctx.get_step_result("nuclei") or {}
+        if _nuclei_for_score.get("error") == "Nuclei timeout after 180s":
+            _add_log(db, scan_id,
+                     "[P4] Nuclei timeout -- using neutral score 50 instead of 0",
+                     level="info")
         risk_report = compute_enhanced_risk_score(ctx, correlation_report)
         risk_score  = risk_report["final_score"]
 

@@ -27,7 +27,7 @@ export default function Sidebar({ onCmdK }: Props) {
 
   const isActive = (item: typeof NAV_MAIN[0]) => {
     if (item.exact) return pathname === item.href;
-    return pathname.startsWith(item.href);
+    return pathname?.startsWith(item.href) ?? false;
   };
 
   const handleLogout = () => { logout(); router.push("/login"); };

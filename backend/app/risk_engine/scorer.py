@@ -26,9 +26,12 @@ Anti-underestimation guards (v4) :
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import ipaddress
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.workers.pipeline_context import PipelineContext
@@ -38,6 +41,8 @@ if TYPE_CHECKING:
 
 
 def _f_nuclei(nuclei_data: Dict[str, Any]) -> float:
+    if nuclei_data.get("error") == "Nuclei timeout after 180s":
+        return 50.0   # timeout != no vulns -- use neutral score
     if nuclei_data.get("error"):
         return 0.0
     by_sev   = nuclei_data.get("by_severity", {})
@@ -253,6 +258,7 @@ def compute_enhanced_risk_score(
     ffuf_data    = ctx.get_step_result("ffuf")       or {}
     nikto_data   = ctx.get_step_result("nikto")      or {}
     wapiti_data  = ctx.get_step_result("wapiti")     or {}
+    idor_data    = ctx.get_step_result("idor")       or {}
 
     cr = correlation_report or {}
 
@@ -273,28 +279,26 @@ def compute_enhanced_risk_score(
     confidence   = float(cr.get("confidence_score", 50.0))
     threat_intel = float(cr.get("threat_intel_factor", 0.0))
 
-    # Formule pondérée v4 (= 100%)
-    # Nuclei réduit à 20%, Wapiti monté à 13%, ZAP à 17% pour mieux refléter
-    # les vulnérabilités web (XSS, SQLi) sans CVE associé.
+    # Formule pondérée v5 (= 100%)
+    # exploitability monte a 20% (indicateur le plus fiable)
+    # nuclei reduit a 15% (timeout ne doit plus tuer le score)
+    # endpoint_risk monte a 10% (IDOR/sensitive paths importants)
     score = (
-        f_nuclei    * 0.20
-        + f_zap     * 0.17
-        + f_abuse   * 0.11
-        + f_vt      * 0.07
-        + f_exploit * 0.08
-        + f_port    * 0.06
-        + f_cve_sev * 0.04
-        + f_svc_exp * 0.03
-        + f_endpoints * 0.03
-        + f_network * 0.02
-        + f_nikto   * 0.06
-        + f_wapiti  * 0.13
+        f_exploit   * 0.20
+        + f_nuclei  * 0.15
+        + f_zap     * 0.18
+        + f_endpoints * 0.10
+        + f_nikto   * 0.08
+        + f_abuse   * 0.08
+        + f_vt      * 0.05
+        + f_port    * 0.07
+        + f_cve_sev * 0.05
+        + f_svc_exp * 0.04
     )
 
-    # FIX F: renormalize weights when AbuseIPDB+VirusTotal are structurally
-    # zero (private/internal target IP) - these factors total 18% weight
-    # (0.11 + 0.07) and would otherwise cap the max score at 82/100.
-    PRIVATE_IP_TI_WEIGHT = 0.11 + 0.07
+    # Renormalize when AbuseIPDB+VirusTotal are structurally zero
+    # (private/internal target IP) -- these factors total 13% (0.08 + 0.05).
+    PRIVATE_IP_TI_WEIGHT = 0.08 + 0.05
     if _target_ip_is_private(abuse_data):
         score = score / (1 - PRIVATE_IP_TI_WEIGHT)
 
@@ -321,7 +325,23 @@ def compute_enhanced_risk_score(
     if corr_by_sev.get("critical", 0) >= 1:
         score = max(score, 75.0)   # critical          → au moins HIGH (75)
 
+    # ── Anti-underestimation guards — correlated findings volume ─────────────
+    correlated_findings = cr.get("total_findings", 0)
+    medium_count = corr_by_sev.get("medium", 0)
+    if correlated_findings >= 15:
+        score = max(score, 45.0)
+    if correlated_findings >= 15 and medium_count >= 2:
+        score = max(score, 50.0)
+        logger.info(
+            "[P4] Score floor applied: corr_findings=%d medium=%d -> floor=50",
+            correlated_findings, medium_count,
+        )
+
     final = min(int(score), 100)
+
+    # FIX 2: IDOR bonus -- confirmed high finding, +10 capped at 100
+    if not idor_data.get("skipped") and idor_data.get("total", 0) >= 1:
+        final = min(final + 10, 100)
 
     return {
         "final_score": final,

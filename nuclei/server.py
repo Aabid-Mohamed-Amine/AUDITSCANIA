@@ -292,11 +292,13 @@ def _build_base_cmd(output_path: str, severity: str) -> List[str]:
         "-silent",
         "-no-color",
         "-no-interactsh",
-        "-timeout",      "10",
-        "-rate-limit",   "20",
-        "-bulk-size",    "10",
-        "-c",            "10",
-        "-retries",      "1",
+        "-timeout",         "8",
+        "-max-host-error",  "3",
+        "-rate-limit",      "10",
+        "-bulk-size",       "5",
+        "-c",               "10",
+        "-retries",         "1",
+        "-exclude-tags",    "network,ssl,dns,file,code",
     ]
 
 
@@ -480,14 +482,17 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     _CMD_TIMEOUT = max(90, req.timeout - 15)
 
     async def _run_cmd(cmd: List[str], label: str) -> None:
+        logger.info("[Nuclei] CMD: %s", " ".join(cmd))
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=_CMD_TIMEOUT)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=_CMD_TIMEOUT)
+            stdout_text = (stdout_bytes or b"").decode(errors="replace")
             stderr_text = (stderr_bytes or b"").decode(errors="replace").strip()
+            logger.info("[Nuclei] exit_code=%d stdout_lines=%d", proc.returncode, len(stdout_text.splitlines()))
             if stderr_text:
                 logger.debug("Nuclei %s stderr: %s", label, stderr_text[:300])
             if proc.returncode == 2:

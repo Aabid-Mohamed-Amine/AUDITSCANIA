@@ -499,9 +499,9 @@ export default function NewScanPage() {
                   key={i}
                   className={i === consoleLogs.length - 1 ? "animate-pulse" : ""}
                   style={{
-                    color: log.startsWith("[WARN]")
+                    color: log?.startsWith("[WARN]")
                       ? "#f59e0b"
-                      : log.startsWith("[INFO]")
+                      : log?.startsWith("[INFO]")
                         ? "rgba(74,222,163,0.9)"
                         : "#9ca3af",
                   }}

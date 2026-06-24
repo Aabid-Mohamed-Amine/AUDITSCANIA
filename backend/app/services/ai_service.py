@@ -391,8 +391,6 @@ _GEMINI_FALLBACK_CHAIN: List[str] = [
     "gemini-2.5-flash",          # ← recommandé : disponible + gratuit
     "gemini-2.0-flash-lite",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
 ]
 
 

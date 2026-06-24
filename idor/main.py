@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
 import secrets
+import string
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -117,7 +119,9 @@ async def scan(req: ScanRequest) -> JSONResponse:
 
 
 def _make_identity(role: str) -> Dict[str, str]:
-    suffix = secrets.token_hex(6)
+    ts = int(time.time())
+    rand = ''.join(random.choices(string.ascii_lowercase, k=6))
+    suffix = f"{ts}_{rand}"
     pwd = "Aud1t!" + secrets.token_hex(8)
     email = f"auditscan_idor_test_{role}_{suffix}@auditscan-test.local"
     return {
@@ -387,22 +391,30 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
             follow_redirects=True,
             headers={"User-Agent": _UA, "Accept": "application/json"},
         ) as client:
-            # Always create user B (we need B's email + ID for the proof)
-            uid_b = await _register(client, base, identity_b)
-            if uid_b is not None:
-                registration_possible = True
-                user_b_id = uid_b
-                logger.info("IDOR: user B id=%d", user_b_id)
-            elif uid_b is None:
-                # register returned None -- might mean registered but no ID in response
-                # We still attempt login to verify
-                registration_possible = True
+            # Always create user B -- retry up to 3 times with a fresh unique email on collision
+            for _b_attempt in range(3):
+                if _b_attempt > 0:
+                    identity_b = _make_identity("b")
+                    logger.info("IDOR: user B retry %d -- new email %s", _b_attempt, identity_b["email"])
+                uid_b = await _register(client, base, identity_b)
+                if uid_b is not None:
+                    registration_possible = True
+                    user_b_id = uid_b
+                    logger.info("IDOR: user B id=%d", user_b_id)
+                else:
+                    # registered but no ID in response, or failed -- still attempt login
+                    registration_possible = True
 
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
 
-            user_b_token, user_b_cookies, uid_b_login = await _login(client, base, identity_b)
-            if uid_b_login and not user_b_id:
-                user_b_id = uid_b_login
+                user_b_token, user_b_cookies, uid_b_login = await _login(client, base, identity_b)
+                if uid_b_login and not user_b_id:
+                    user_b_id = uid_b_login
+
+                if user_b_token or user_b_cookies or user_b_id:
+                    break
+            else:
+                logger.warning("IDOR: user B creation failed after 3 attempts -- IDOR test will be skipped")
 
             # Only create user A if pipeline didn't provide existing auth
             if not has_existing_auth:

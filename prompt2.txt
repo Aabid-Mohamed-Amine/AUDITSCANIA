@@ -1,0 +1,22 @@
+In AuditScanIA scorer.py, the risk score drops to 33/100 
+when IDOR is skipped, even with 17 confirmed findings.
+
+FIX 1 — Add floor guards after existing corr.high guard:
+
+  if correlated_findings >= 15:
+      final = max(final, 45)
+
+  if correlated_findings >= 15 and medium_count >= 2:
+      final = max(final, 50)
+
+FIX 2 — Find exploitability in correlator.py or P4 section:
+Show me the current exploitability formula then add:
+  if sensitive_paths_count >= 7:
+      base_exploit = min(base_exploit + 15, 100)
+  if medium_findings_count >= 2:
+      base_exploit = min(base_exploit + 10, 100)
+
+FIX 3 — Log the triggered guard:
+  "[P4] Score floor applied: corr_findings={N} medium={M} → floor=50"
+
+Show full diff. ASCII quotes only.

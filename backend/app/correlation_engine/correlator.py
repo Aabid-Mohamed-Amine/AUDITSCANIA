@@ -683,8 +683,18 @@ def correlate(
     exploit_scores = [f.get("exploitability_score", 0.0) for f in findings]
     if exploit_scores:
         top = sorted(exploit_scores, reverse=True)
-        exploitability_score = top[0] * 0.70 + (sum(top) / len(top)) * 0.30
-        exploitability_score = min(exploitability_score, 100.0)
+        base_exploit = top[0] * 0.70 + (sum(top) / len(top)) * 0.30
+        sensitive_paths_count = (
+            len(ffuf_data.get("by_severity", {}).get("critical", []))
+            + len(ffuf_data.get("by_severity", {}).get("high", []))
+            + len(ffuf_data.get("by_severity", {}).get("medium", []))
+        )
+        medium_findings_count = sum(1 for f in findings if f.get("severity") == "medium")
+        if sensitive_paths_count >= 7:
+            base_exploit = min(base_exploit + 15, 100)
+        if medium_findings_count >= 2:
+            base_exploit = min(base_exploit + 10, 100)
+        exploitability_score = min(base_exploit, 100.0)
     else:
         exploitability_score = 0.0
 
