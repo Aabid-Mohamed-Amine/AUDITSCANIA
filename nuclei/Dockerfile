@@ -25,10 +25,10 @@ COPY entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && \
     chmod +x /entrypoint.sh
 
-# Bake nuclei-templates from local build context (templates/ dir populated by setup)
-# To regenerate: docker cp host-templates/ nuclei-container:/root/nuclei-templates/
-COPY templates/ /root/nuclei-templates/
-RUN echo "[nuclei-build] Templates baked: $(find /root/nuclei-templates -name '*.yaml' | wc -l) yaml files"
+# Download nuclei-templates at build time so CI doesn't need local copies
+RUN nuclei -update-templates -silent 2>/dev/null && \
+    echo "[nuclei-build] Templates baked: $(find /root/nuclei-templates -name '*.yaml' | wc -l) yaml files" || \
+    echo "[nuclei-build] Template download skipped (no network during build)"
 
 EXPOSE 9001
 
