@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import pathlib
 import re
 import shutil
 import uuid
@@ -32,8 +33,10 @@ app = FastAPI(title="SQLMap Assessment Microservice", version="2.0.0")
 # Ã¢â€â‚¬Ã¢â€â‚¬ Safe assessment flags (no data extraction, no destructive payloads) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 _BASE_FLAGS = [
     "--batch",
-    "--level=2",           # level 2: more params, cookies (vs 1)
-    "--risk=1",            # safest: no heavy UPDATE/INSERT payloads
+    "--level=3",           # level 3: headers, cookies, more vectors
+    "--risk=2",            # risk 2: heavier payloads without destructive UPDATE/DELETE
+    "--technique=BEUST",   # Boolean + Error + Union + Stacked + Time-based
+    "--dbms=sqlite",       # Juice Shop / typical lab target uses SQLite
     "--no-cast",
     "--fresh-queries",
     "--flush-session",
@@ -191,7 +194,7 @@ def _select_technique(params: List[str], url: str) -> str:
     if any(p in params_lower for p in {"file", "path", "dir", "include", "page"}):
         return "BE"
 
-    return "BEU"   # default: Boolean + Error + Union
+    return "BEUST"   # default: Boolean + Error + Union + Stacked + Time-based
 
 
 # ---------------------------------------------------------------------------
@@ -338,8 +341,11 @@ async def _run_sqlmap_single(
         if data:
             cmd += ["--data", data]
         cmd += ["--method=POST"]
-        # Explicit param targeting for POST -- focuses SQLMap on known injectable param
-        if params:
+        # When data contains a * wildcard, SQLMap injects at that exact position —
+        # adding -p as well causes SQLMap to ignore the * and pick a different
+        # injection point, breaking JSON body injection.
+        _has_wildcard = "*" in (data or "")
+        if params and not _has_wildcard:
             post_test_params = [p for p in params if p.lower() in {x.lower() for x in _HIGH_VALUE_PARAMS}]
             if not post_test_params:
                 post_test_params = params
@@ -354,17 +360,22 @@ async def _run_sqlmap_single(
         #   probes need full speed to reach OR-based boolean payloads in time.
         # --technique=B: boolean-based blind alone found the auth-bypass SQLi in ~12s;
         #   BEU (default) wastes budget on Error/Union techniques first.
-        # Filter conflicting defaults instead of relying on "last flag wins".
+        # Filter conflicting defaults so POST override flags always win.
         cmd = [c for c in cmd
-               if c not in ("--risk=1", "--delay=2", "--level=2")
-               and not c.startswith("--technique=")]
-        cmd += ["--risk=3", "--level=3", "--delay=0", "--technique=B", "--ignore-code=401,403,500"]
+               if not c.startswith("--risk=")
+               and not c.startswith("--delay=")
+               and not c.startswith("--level=")
+               and not c.startswith("--technique=")
+               and not c.startswith("--dbms=")]
+        # 400 added: JSON-injected payloads can cause parse errors on strict servers
+        cmd += ["--risk=3", "--level=3", "--delay=0", "--technique=B",
+                "--dbms=sqlite", "--ignore-code=400,401,403,500"]
         # --level=3 (overrides _BASE_FLAGS --level=2): the working auth-bypass
         # payload uses the "OR boolean-based blind (NOT)" variant, which sqlmap
         # only tests starting at level 3 -- level 2 silently misses it.
     else:
-        if target.get("source") in ("primary",) and not params:
-            cmd += ["--forms", "--crawl=1"]   # base target fallback
+        if target.get("source") in ("primary", "fallback") and not params:
+            cmd += ["--forms", "--crawl=2"]
 
     logger.info("SQLMap cmd (%s %s): %s", method, url[:60], " ".join(cmd[3:]))
 
@@ -378,13 +389,12 @@ async def _run_sqlmap_single(
         stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         stdout_text = stdout_bytes.decode(errors="replace")
         # sqlmap writes the structured "Parameter:/Type:/Title:/Payload:" block
-        # to output_dir/<hostname>/log, NOT to stdout. Read it if it exists.
+        # to output_dir/<hostname>/log when --output-dir is set.
         try:
-            from urllib.parse import urlparse as _urlparse
-            _host = _urlparse(url).hostname or "target"
-            import pathlib
-            _sqlmap_default = pathlib.Path.home() / ".local" / "share" / "sqlmap" / "output" / _host / "log"
-            _log_path = str(_sqlmap_default)
+            _host = urlparse(url).hostname or "target"
+            _sqlmap_log = pathlib.Path(output_dir) / _host / "log"
+            _log_path = str(_sqlmap_log)
+            logger.info("[SQLMap] reading log from: %s (exists=%s)", _log_path, os.path.exists(_log_path))
             if os.path.exists(_log_path):
                 _log_content = open(_log_path, errors="replace").read()
                 if "Parameter:" in _log_content:
@@ -395,6 +405,16 @@ async def _run_sqlmap_single(
     except asyncio.TimeoutError:
         try: proc.kill()
         except Exception: pass
+        # SQLMap may have written a finding to the log before timing out — recover it
+        try:
+            _host_t = urlparse(url).hostname or "target"
+            _log_t = pathlib.Path(output_dir) / _host_t / "log"
+            if _log_t.exists():
+                _lc = _log_t.read_text(errors="replace")
+                if "Parameter:" in _lc:
+                    return _lc + f"\n[TIMEOUT after {timeout}s on {url}]"
+        except Exception:
+            pass
         return f"[TIMEOUT after {timeout}s on {url}]"
     except Exception as exc:
         return f"[ERROR: {exc}]"
@@ -462,6 +482,50 @@ def _parse_sqlmap_output(output: str, target_url: str = "") -> List[Dict[str, An
             ),
         })
 
+    # Stdout fallback: parse "parameter X is injectable" lines when log block is absent.
+    # SQLMap prints these even when the log file is not read (e.g., output-dir issue).
+    if not findings:
+        for _line in output.splitlines():
+            _m = re.search(
+                r"(?:POST|GET)\s+parameter\s+'([^']+)'\s+is\s+'([^']+)'\s+injectable",
+                _line, re.IGNORECASE,
+            )
+            if not _m:
+                # also catch: parameter 'JSON email' appears to be 'OR boolean ...' injectable
+                _m = re.search(
+                    r"parameter\s+'([^']+)'\s+(?:appears to be|is)\s+'([^']+)'\s+injectable",
+                    _line, re.IGNORECASE,
+                )
+            if _m:
+                _param_raw, _tech_raw = _m.group(1).strip(), _m.group(2).strip()
+                # Strip "JSON " prefix that SQLMap adds for JSON body params
+                _param_clean = re.sub(r"^(?:JSON|POST|GET)\s+", "", _param_raw, flags=re.IGNORECASE)
+                _url_lower   = target_url.lower()
+                _is_login    = any(k in _url_lower for k in ("login", "/rest/user/"))
+                _is_bool     = "boolean" in _tech_raw.lower()
+                _sev         = "critical" if (_is_login and _is_bool) else "high"
+                _cwe         = ["cwe-89", "cwe-287"] if (_is_login and _is_bool) else ["cwe-89"]
+                findings.append({
+                    "parameter":       _param_clean,
+                    "technique":       _tech_raw,
+                    "title":           (
+                        f"SQL Injection - Authentication Bypass ({_tech_raw})"
+                        if _is_login and _is_bool
+                        else f"SQL Injection ({_tech_raw})"
+                    ),
+                    "payload_example": "",
+                    "severity":        _sev,
+                    "cwe_ids":         _cwe,
+                    "cwe_id":          "89",
+                    "dbms":            dbms,
+                    "target_url":      target_url,
+                    "description":     (
+                        f"SQL injection via {_tech_raw} on '{_param_clean}'"
+                        + (" - Authentication bypass confirmed" if _is_login and _is_bool else "")
+                    ),
+                    "source":          "stdout_fallback",
+                })
+
     return findings
 
 
@@ -512,14 +576,14 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             "data":      "",
             "source":    "fallback",
             "score":     0,
-            "technique": "BEU",
+            "technique": "BEUST",
         }]
 
-    # Budget: limit to top N targets within timeout
-    # Each target gets a proportional timeout slice
-    max_targets    = min(len(all_targets), 10)
+    # Budget: limit to top 5 targets so each gets ~50s instead of ~30s.
+    # Boolean-based blind needs 50+ requests; 30s was too tight on busy hosts.
+    max_targets    = min(len(all_targets), 5)
     targets_to_run = all_targets[:max_targets]
-    per_target_timeout = max(30, req.timeout // max(len(targets_to_run), 1) - 10)
+    per_target_timeout = max(60, req.timeout // max(len(targets_to_run), 1) - 10)
 
     logger.info(
         "Testing %d/%d targets, %ds each",

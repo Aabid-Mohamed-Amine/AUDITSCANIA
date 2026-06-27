@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import random
@@ -176,6 +177,21 @@ def _find_id(data: Any, depth: int = 0) -> Optional[int]:
             if result is not None:
                 return result
     return None
+
+
+def _decode_jwt_id(token: str) -> Optional[int]:
+    """Extract user ID from JWT payload without signature verification.
+    Juice Shop JWT: {"data": {"id": N, "email": "...", ...}, "iat": ..., "exp": ...}
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        pad = 4 - len(parts[1]) % 4
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * pad).decode("utf-8"))
+        return _find_id(payload)
+    except Exception:
+        return None
 
 
 def _find_token(data: Any, depth: int = 0) -> Optional[str]:
@@ -410,6 +426,11 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                 user_b_token, user_b_cookies, uid_b_login = await _login(client, base, identity_b)
                 if uid_b_login and not user_b_id:
                     user_b_id = uid_b_login
+                # Fallback: decode JWT to extract ID when registration/login didn't return it
+                if not user_b_id and user_b_token:
+                    user_b_id = _decode_jwt_id(user_b_token)
+                    if user_b_id:
+                        logger.info("IDOR: user B id=%d (from JWT decode)", user_b_id)
 
                 if user_b_token or user_b_cookies or user_b_id:
                     break
@@ -428,6 +449,8 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                 user_a_token, user_a_cookies, uid_a_login = await _login(client, base, identity_a)
                 if uid_a_login and not user_a_id:
                     user_a_id = uid_a_login
+                if not user_a_id and user_a_token:
+                    user_a_id = _decode_jwt_id(user_a_token)
                 user_a_email = identity_a["email"]
             else:
                 # Pipeline provided user A's auth -- extract token from headers
@@ -438,6 +461,11 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                 user_a_cookies = req.auth_cookies or None
                 user_a_email = req.user_a_email
                 user_a_id = req.user_a_id
+                # Decode JWT to get user_a_id if not provided by pipeline
+                if not user_a_id and user_a_token:
+                    user_a_id = _decode_jwt_id(user_a_token)
+                    if user_a_id:
+                        logger.info("IDOR: user A id=%d (from pipeline JWT decode)", user_a_id)
 
     except asyncio.TimeoutError:
         logger.warning("IDOR: account setup timed out after %ds", account_timeout)

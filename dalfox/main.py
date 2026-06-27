@@ -45,9 +45,12 @@ async def _run_dalfox(url: str, timeout: int, deep_mode: bool, auth_headers: Opt
         "scan", url,
         "--format", "json",
         "--silence",
-        "--timeout", "10",
-        "--scan-timeout", str(min(timeout, 300)),
+        "--timeout", "5",
+        "--scan-timeout", str(min(timeout, 20)),
         "--no-color",
+        "--skip-mining-dom",
+        "--skip-mining-dict",
+        "--no-freq",
     ]
     # dalfox v3 no longer auto-discovers query-string params from the URL --
     # params_discovered stays 0 unless declared explicitly via -p. Extract
@@ -77,7 +80,7 @@ async def _run_dalfox(url: str, timeout: int, deep_mode: bool, auth_headers: Opt
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 15)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
         raw_output = stdout.decode(errors="ignore")
 
         # Dalfox peut sortir du JSON line-by-line ou en array
@@ -139,13 +142,21 @@ async def health() -> JSONResponse:
 async def scan(req: ScanRequest) -> JSONResponse:
     start       = time.time()
     targets     = req.urls if req.urls else [req.target]
-    per_timeout = max(10, req.timeout // len(targets))
-    logger.info("Dalfox scan: %d URL(s) (deep=%s)", len(targets), req.deep_mode)
+    # Parallel execution: all URLs scanned simultaneously, total time = single per-URL budget
+    per_timeout = max(20, req.timeout // max(len(targets), 1))
+    logger.info("Dalfox scan: %d URL(s) (deep=%s, per_timeout=%ds)", len(targets), req.deep_mode, per_timeout)
+
+    results = await asyncio.gather(
+        *[_run_dalfox(url, per_timeout, req.deep_mode, req.auth_headers) for url in targets],
+        return_exceptions=True,
+    )
 
     all_raw:    List[Dict[str, Any]] = []
     last_error: Optional[str]        = None
-    for url in targets:
-        res = await _run_dalfox(url, per_timeout, req.deep_mode, req.auth_headers)
+    for res in results:
+        if isinstance(res, Exception):
+            last_error = str(res)
+            continue
         if res.get("error"):
             last_error = res["error"]
         all_raw.extend(res.get("findings") or [])

@@ -172,11 +172,11 @@ _CMS_KW:       List[str] = ["wordpress", "drupal", "joomla", "typo3", "magento",
 _APACHE_KW:    List[str] = ["apache", "nginx", "lighttpd", "iis"]
 
 _PROFILE_CONFIG: Dict[str, Any] = {
-    "web_spa":         {"nuclei_tags": ["xss", "cors", "headers", "exposure", "misconfig", "token", "swagger", "unauth"], "nuclei_timeout": 120, "dalfox_timeout": 0, "ffuf_timeout": 90},
-    "web_traditional": {"nuclei_tags": ["sqli", "lfi", "rce", "misconfig", "exposure"],       "nuclei_timeout": 180, "dalfox_timeout": 200, "ffuf_timeout": 120},
-    "devops_tool":     {"nuclei_tags": ["panel", "unauth", "exposure", "token", "misconfig"], "nuclei_timeout": 180, "dalfox_timeout": 0,   "ffuf_timeout": 90},
-    "cms":             {"nuclei_tags": ["wordpress", "drupal", "sqli", "xss", "exposure"],    "nuclei_timeout": 180, "dalfox_timeout": 180, "ffuf_timeout": 90},
-    "web_generic":     {"nuclei_tags": ["cors", "csp", "headers", "unauth", "sqli", "xss"],  "nuclei_timeout": 150, "dalfox_timeout": 150, "ffuf_timeout": 90},
+    "web_spa":         {"nuclei_tags": ["xss", "cors", "headers", "exposure", "misconfig", "token", "swagger", "unauth", "ssrf", "xxe", "injection", "traversal"], "nuclei_timeout": 120, "dalfox_timeout": 300, "ffuf_timeout": 90},
+    "web_traditional": {"nuclei_tags": ["sqli", "lfi", "rce", "misconfig", "exposure"],       "nuclei_timeout": 300, "dalfox_timeout": 200, "ffuf_timeout": 120},
+    "devops_tool":     {"nuclei_tags": ["panel", "unauth", "exposure", "token", "misconfig"], "nuclei_timeout": 300, "dalfox_timeout": 0,   "ffuf_timeout": 90},
+    "cms":             {"nuclei_tags": ["wordpress", "drupal", "sqli", "xss", "exposure"],    "nuclei_timeout": 300, "dalfox_timeout": 180, "ffuf_timeout": 90},
+    "web_generic":     {"nuclei_tags": ["cors", "csp", "headers", "unauth", "sqli", "xss"],  "nuclei_timeout": 300, "dalfox_timeout": 150, "ffuf_timeout": 90},
 }
 
 
@@ -292,8 +292,13 @@ def _rule_based_decision(
         or (profile == "web_spa" and 3000 in ports)
     )
     if _is_juiceshop:
-        tags = ["exposure", "misconfig", "sqli", "token", "swagger", "xss", "cors", "unauth", "redirect"]
+        tags = [
+            "exposure", "misconfig", "sqli", "token", "swagger", "xss", "cors", "unauth", "redirect",
+            "ssrf", "xxe", "injection", "traversal",
+        ]
+        skip.pop("dalfox", None)
         logger.info("[AgentDecide] Juice Shop detected -- nuclei_tags overridden for OWASP app profile")
+        logger.info("[AGENT] Dalfox re-enabled: Juice Shop detected (XSS testing)")
 
     # -- URL-based port inference ----------------------------------------------
     # Nmap can return 0 ports for Docker-internal targets (DNS not ready yet,
@@ -484,7 +489,7 @@ def _build_prompt(
         '  "tools": ["tools to run"],\n'
         '  "skip": ["tools to skip"],\n'
         '  "nuclei_tags": ["tag1", "tag2"],\n'
-        '  "nuclei_timeout": 120,\n'
+        '  "nuclei_timeout": 300,\n'
         '  "dalfox_timeout": 0,\n'
         '  "ffuf_timeout": 90,\n'
         '  "reason": "one line explanation"\n'
@@ -633,10 +638,25 @@ async def agent_decide(
         decision["nuclei_timeout"] = _prof_cfg["nuclei_timeout"]
         decision["dalfox_timeout"] = _prof_cfg["dalfox_timeout"]
         decision["ffuf_timeout"]   = _prof_cfg["ffuf_timeout"]
+        logger.info("[AGENT] nuclei_timeout=%ds for profile=%s", _prof_cfg["nuclei_timeout"], _prof)
         if _prof == "devops_tool" and "dalfox" not in decision.get("skip", []):
             decision["skip"].append("dalfox")
             decision["reasons"]["dalfox"] = "devops_tool profile -- no user input forms expected"
             decision["tools"] = [t for t in decision["tools"] if t != "dalfox"]
+
+        # Hard-rule H -- Juice Shop: always re-enable dalfox regardless of Gemini decision
+        _jtitles = " ".join(ctx.get("http_titles", [])).lower()
+        _is_js_hr = (
+            "juice" in _jtitles or "owasp" in _jtitles
+            or "juiceshop" in ctx["blob"].lower()
+        )
+        if _is_js_hr and "dalfox" in decision.get("skip", []):
+            decision["skip"]    = [t for t in decision["skip"] if t != "dalfox"]
+            decision["reasons"].pop("dalfox", None)
+            if "dalfox" not in decision["tools"]:
+                decision["tools"].append("dalfox")
+            decision["dalfox_timeout"] = 300
+            logger.info("[AGENT] Hard-rule H: Dalfox re-enabled for Juice Shop (XSS testing)")
 
         decision["source"] = "gemini"
         logger.info(
@@ -657,8 +677,25 @@ async def agent_decide(
 
     # Enhanced skip rules for fallback path
     _fb_profile  = _detect_target_profile(ctx)
-    _dalfox_skip = _fb_profile in ("web_spa", "devops_tool") or not ctx.get("has_forms", False)
+    _dalfox_skip = _fb_profile == "devops_tool"
     _sqlmap_skip = (_fb_profile == "devops_tool")
+
+    # Juice Shop detection: always re-enable dalfox regardless of profile
+    _fb_titles = " ".join(ctx.get("http_titles", [])).lower()
+    _juice_shop_detected = (
+        "juice shop" in _fb_titles
+        or "owasp"   in _fb_titles
+        or "juiceshop" in ctx["blob"].lower()
+        or (_fb_profile == "web_spa" and 3000 in list(ctx["ports"]))
+    )
+    if _juice_shop_detected:
+        _dalfox_skip = False
+        rule_decision["skip"]    = [t for t in rule_decision.get("skip", []) if t != "dalfox"]
+        rule_decision["reasons"].pop("dalfox", None)
+        if "dalfox" not in rule_decision.get("tools", []):
+            rule_decision.setdefault("tools", []).append("dalfox")
+        rule_decision["dalfox_timeout"] = 300
+        logger.info("[AGENT] Dalfox re-enabled: Juice Shop detected (XSS testing)")
 
     _new_skips: List[str] = []
     if _dalfox_skip and "dalfox" not in rule_decision.get("skip", []):

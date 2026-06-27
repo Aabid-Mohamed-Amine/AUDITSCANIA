@@ -302,6 +302,19 @@ function PipelineOverview({ scan }: { scan: Scan }) {
     (socReport?.recommendations as unknown[] | undefined)?.length ?? 0
   );
 
+  // Whether threat-intel tools were skipped (internal/private target)
+  const abuseSkipped = Boolean((abuseData as Record<string, unknown> | null)?.skipped) || !abuseData;
+  const vtSkipped    = Boolean((vtData    as Record<string, unknown> | null)?.skipped) || !vtData;
+  const subfSkipped  = Boolean((subfData  as Record<string, unknown> | null)?.skipped) || !subfData;
+
+  // Dynamic Phase 1 subtitle — only list tools that actually ran
+  const p1Subtitle = [
+    "Nmap",
+    !subfSkipped ? "Subfinder" : null,
+    !vtSkipped   ? "VT"        : null,
+    !abuseSkipped ? "AbuseIPDB" : null,
+  ].filter(Boolean).join(" · ");
+
   // Helpers
   const abuseColor  = abuseScore >= 75 ? "text-red-400" : abuseScore >= 25 ? "text-yellow-400" : "text-green-400";
   const scoreColor  = (s: number) =>
@@ -321,13 +334,13 @@ function PipelineOverview({ scan }: { scan: Scan }) {
           </div>
           <div>
             <p className="text-xs font-semibold text-cyan-400">Phase 1 — Recon</p>
-            <p className="text-[10px] text-slate-500">Subfinder · Nmap · VT · AbuseIPDB</p>
+            <p className="text-[10px] text-slate-500">{p1Subtitle}</p>
           </div>
         </div>
         <PhaseStat label="Open ports"    value={openPortsCount} color={openPortsCount > 0 ? "text-orange-400" : "text-green-400"} />
         {subdomains > 0 && <PhaseStat label="Subdomains" value={subdomains} color="text-cyan-400" />}
-        <PhaseStat label="Abuse score"   value={`${abuseScore}%`} color={abuseColor} />
-        <PhaseStat label="VT malicious"  value={vtMalicious} color={vtMalicious > 0 ? "text-red-400" : "text-green-400"} />
+        {!abuseSkipped && <PhaseStat label="Abuse score"  value={`${abuseScore}%`} color={abuseColor} />}
+        {!vtSkipped    && <PhaseStat label="VT malicious" value={vtMalicious} color={vtMalicious > 0 ? "text-red-400" : "text-green-400"} />}
       </div>
 
       {/* ── Phase 2 — Active Scan ── */}
@@ -1395,13 +1408,44 @@ export default function ScanResults({ scan }: ScanResultsProps) {
     { id: "abuseipdb",   label: "AbuseIPDB",    icon: AlertTriangle, dataKey: "abuseipdb_data",    badge: null,         group: "P1" },
   ] as const;
 
+  // Hide threat-intel tabs for internal/skipped targets or when no meaningful data returned
+  const isTabUseful = (tab: (typeof tabs)[number]): boolean => {
+    if (!hasData(tab.dataKey)) return false;
+    const d = scan[tab.dataKey as keyof Scan] as Record<string, unknown> | null;
+    if (!d) return false;
+    // Explicitly skipped by backend (internal target)
+    if (d.skipped === true) return false;
+    switch (tab.id) {
+      case "shodan": {
+        const inet = (d.data as Record<string, unknown> | undefined)?.internetdb as Record<string, unknown> | undefined;
+        return (
+          ((inet?.ports as unknown[]) ?? []).length > 0 ||
+          ((inet?.vulns as unknown[]) ?? []).length > 0 ||
+          ((inet?.cpes  as unknown[]) ?? []).length > 0
+        );
+      }
+      case "virustotal": {
+        const vd = d.data as Record<string, unknown> | undefined;
+        return Number(vd?.malicious ?? 0) > 0 || Number(vd?.suspicious ?? 0) > 0;
+      }
+      case "abuseipdb": {
+        const ad = d.data as Record<string, unknown> | undefined;
+        return Number(ad?.abuse_confidence_score ?? 0) > 0 || Number(ad?.total_reports ?? 0) > 0;
+      }
+      default:
+        return true;
+    }
+  };
+
+  const visibleTabs = tabs.filter(isTabUseful);
+
   const badgeColor = (id: string) => {
     if (id === "sqlmap" || id === "gitleaks") return "bg-red-500/20 text-red-400";
     if (id === "nuclei" || id === "zap")      return "bg-orange-500/20 text-orange-400";
     return "bg-cyan-500/20 text-cyan-400";
   };
 
-  const defaultTab = tabs.find((t) => hasData(t.dataKey))?.id ?? "nuclei";
+  const defaultTab = visibleTabs.find((t) => hasData(t.dataKey))?.id ?? "nuclei";
 
   return (
     <div className="space-y-4">
@@ -1410,7 +1454,7 @@ export default function ScanResults({ scan }: ScanResultsProps) {
 
       <Tabs defaultValue={defaultTab} className="w-full">
         <TabsList className="bg-[#f5f7fa] border border-[#e5e7eb] h-auto p-1 gap-1 flex-wrap">
-          {tabs.map(({ id, label, icon: Icon, dataKey, badge }) => (
+          {visibleTabs.map(({ id, label, icon: Icon, dataKey, badge }) => (
             <TabsTrigger
               key={id}
               value={id}

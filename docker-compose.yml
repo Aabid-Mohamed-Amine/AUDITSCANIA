@@ -93,8 +93,6 @@ services:
       context: ./nuclei
     image: auditscan-nuclei:dev
     restart: unless-stopped
-    volumes:
-      - nuclei_templates:/root/.local/nuclei-templates
     networks:
       - auditscan_net
     healthcheck:
@@ -309,7 +307,7 @@ services:
     networks:
       - auditscan_net
     ports:
-      - "8000:8000"
+      - "8001:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s

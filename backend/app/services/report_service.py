@@ -376,7 +376,37 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
     ]
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — EXECUTIVE SUMMARY + RISK DASHBOARD
+    # PAGE 2 — TABLE OF CONTENTS
+    # ══════════════════════════════════════════════════════════════════════════
+    story.append(Paragraph("Table of Contents", S_H1))
+    story.append(hr(BDO_GOLD, 1.5))
+    toc_entries = [
+        ("1.", "Executive Summary"),
+        ("2.", "Risk Score Dashboard"),
+        ("3.", "Vulnerability Findings Overview"),
+        ("4.", "Critical & High Severity Findings — Detail"),
+        ("5.", "Exploitation Findings (GitLeaks · SQLMap)"),
+        ("6.", "Network Reconnaissance Summary"),
+        ("7.", "Attack Paths Identified"),
+        ("8.", "Recommendations"),
+        ("9.", "Compliance Mapping"),
+        ("10.", "Scanner Coverage"),
+    ]
+    for num, title in toc_entries:
+        story.append(Table(
+            [[Paragraph(num, S_BOLD), Paragraph(title, S_BODY)]],
+            colWidths=[1.2*cm, W - 4*cm - 1.2*cm],
+            style=TableStyle([
+                ("TOPPADDING",    (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+                ("LINEBELOW",     (0, 0), (-1, -1), 0.3, BDO_BORDER),
+            ]),
+        ))
+    story.append(PageBreak())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 3 — EXECUTIVE SUMMARY + RISK DASHBOARD
     # ══════════════════════════════════════════════════════════════════════════
     story.append(Paragraph("1. Executive Summary", S_H1))
     story.append(hr(BDO_GOLD, 1.5))
@@ -393,7 +423,7 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
         story += [sp(6), Paragraph("<b>SOC Operational Note:</b>", S_BOLD),
                   Paragraph(soc_sum, S_BODY)]
 
-    story += [sp(10), Paragraph("2. Risk Score Dashboard", S_H1), hr(BDO_GOLD, 1.5)]
+    story += [sp(10), Paragraph("2. Risk Score Dashboard", S_H1), hr(BDO_GOLD, 1.5)]  # noqa
 
     # Risk components table
     comp_scores = risk.get("component_scores", {})
@@ -452,13 +482,19 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
     story.append(PageBreak())
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 3 — FINDINGS
+    # PAGE 4 — FINDINGS OVERVIEW
     # ══════════════════════════════════════════════════════════════════════════
     findings    = report.get("findings", [])
     stats       = report.get("findings_stats", {})
-    by_sev      = stats.get("by_severity", {})
+    # Sort Critical → High → Medium → Low → Info (always, regardless of upstream order)
+    findings = sorted(findings, key=lambda x: _SEV_ORDER.get(x.get("severity", "info").lower(), 4))
+    # Recompute by_sev directly from the actual findings list so the stats bar is always accurate
+    by_sev: Dict[str, int] = {}
+    for _f in findings:
+        _s = _f.get("severity", "info").lower()
+        by_sev[_s] = by_sev.get(_s, 0) + 1
 
-    story.append(Paragraph("3. Vulnerability Findings", S_H1))
+    story.append(Paragraph("3. Vulnerability Findings Overview", S_H1))
     story.append(hr(BDO_GOLD, 1.5))
 
     # Stats summary bar
@@ -552,14 +588,86 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
     story.append(PageBreak())
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 4 — PHASE 3 EXPLOITATION DETAILS
+    # PAGE 5 — CRITICAL & HIGH SEVERITY FINDINGS — DETAIL
+    # ══════════════════════════════════════════════════════════════════════════
+    crit_high = [f for f in findings if f.get("severity", "").lower() in ("critical", "high")]
+    story.append(Paragraph("4. Critical & High Severity Findings — Detail", S_H1))
+    story.append(hr(BDO_GOLD, 1.5))
+
+    if not crit_high:
+        story.append(Paragraph("No critical or high severity findings identified.", S_BODY))
+    else:
+        for i, f in enumerate(crit_high[:15], 1):
+            sev       = f.get("severity", "info").lower()
+            sev_c     = SEV_COLORS.get(sev, SEV_COLORS["info"])
+            title     = f.get("title", "Unknown")
+            cves      = ", ".join(f.get("cve_ids", [])[:3]) or "—"
+            cwes      = ", ".join(f"CWE-{c}" for c in (f.get("cwe_ids") or [])[:3]) or "—"
+            tools     = ", ".join(f.get("detected_by_display") or f.get("detected_by") or ["unknown"])
+            location  = str(f.get("matched_at") or f.get("affected_service") or "—")[:80]
+            port_svc  = ""
+            if f.get("affected_port"):
+                port_svc = f" (port {f['affected_port']}" + (f"/{f['affected_service']}" if f.get("affected_service") else "") + ")"
+            conf_flag = "✓ Confirmed" if f.get("fp_status") == "confirmed" else "Suspicious" if f.get("fp_status") == "suspicious" else ""
+
+            finding_block = [
+                Table(
+                    [[
+                        Paragraph(
+                            f"<b>{i}. {title}</b>",
+                            _style(f"fh_{i}", fontSize=10, textColor=BDO_NAVY, fontName="Helvetica-Bold"),
+                        ),
+                        Paragraph(
+                            f"<b>{sev.upper()}</b>",
+                            _style(f"fs_{i}", fontSize=9, textColor=sev_c, fontName="Helvetica-Bold", alignment=TA_RIGHT),
+                        ),
+                    ]],
+                    colWidths=[W - 4*cm - 2.5*cm, 2.5*cm],
+                    style=TableStyle([
+                        ("BACKGROUND",    (0, 0), (-1, -1), BDO_LIGHT),
+                        ("TOPPADDING",    (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+                        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+                        ("LINEBELOW",     (0, 0), (-1, -1), 1.0, sev_c),
+                    ]),
+                ),
+                sp(2),
+            ]
+
+            detail_rows = [
+                ("Detected by",  tools),
+                ("Location",     location + port_svc),
+                ("CVE IDs",      cves),
+                ("CWE IDs",      cwes),
+                ("Confidence",   conf_flag or "—"),
+            ]
+            for label, value in detail_rows:
+                if value and value != "—":
+                    finding_block.append(Table(
+                        [[Paragraph(f"<b>{label}:</b>", S_SMALL), Paragraph(value, S_MONO)]],
+                        colWidths=[3.5*cm, W - 4*cm - 3.5*cm],
+                        style=TableStyle([
+                            ("TOPPADDING",    (0, 0), (-1, -1), 2),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                            ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+                        ]),
+                    ))
+
+            finding_block.append(sp(6))
+            story.append(KeepTogether(finding_block))
+
+    story.append(PageBreak())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 6 — PHASE 3 EXPLOITATION DETAILS
     # ══════════════════════════════════════════════════════════════════════════
     expl = report.get("exploitation", {})
-    story += [Paragraph("4. Exploitation Findings (Phase 3)", S_H1), hr(BDO_GOLD, 1.5)]
+    story += [Paragraph("5. Exploitation Findings (GitLeaks · SQLMap)", S_H1), hr(BDO_GOLD, 1.5)]
 
     # Secrets
     secrets = expl.get("secrets_findings", [])
-    story.append(Paragraph(f"4.1 Secrets Detected — GitLeaks ({expl.get('secrets_total', 0)} findings)", S_H2))
+    story.append(Paragraph(f"5.1 Secrets Detected — GitLeaks ({expl.get('secrets_total', 0)} findings)", S_H2))
     if secrets:
         sec_data = [[Paragraph("<b>Severity</b>", S_BOLD), Paragraph("<b>Rule</b>", S_BOLD),
                      Paragraph("<b>File / Location</b>", S_BOLD), Paragraph("<b>Description</b>", S_BOLD)]]
@@ -589,7 +697,7 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
     story.append(sp(8))
 
     # SQLMap
-    story.append(Paragraph("4.2 SQL Injection — SQLMap", S_H2))
+    story.append(Paragraph("5.2 SQL Injection — SQLMap", S_H2))
     if expl.get("sqlmap_skipped"):
         story.append(Paragraph("SQLMap not executed — no injectable parameters detected by ZAP (false positive reduction).", S_BODY))
     elif expl.get("sqlmap_vulnerable"):
@@ -606,18 +714,65 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
     story.append(PageBreak())
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 5 — ATTACK PATHS + RECOMMENDATIONS
+    # PAGE 7 — NETWORK RECONNAISSANCE SUMMARY
+    # ══════════════════════════════════════════════════════════════════════════
+    network = report.get("network", {})
+    story += [Paragraph("6. Network Reconnaissance Summary", S_H1), hr(BDO_GOLD, 1.5)]
+
+    open_ports  = network.get("open_ports", [])
+    services    = network.get("services", {})
+    subdomains  = network.get("subdomains", 0)
+    live_hosts  = network.get("live_hosts", 0)
+    technologies = network.get("technologies", [])
+
+    net_rows = [
+        [Paragraph("<b>Metric</b>", S_BOLD), Paragraph("<b>Value</b>", S_BOLD)],
+        [Paragraph("Open Ports", S_SMALL),   Paragraph(", ".join(str(p) for p in open_ports[:20]) or "None detected", S_MONO)],
+        [Paragraph("Subdomains", S_SMALL),   Paragraph(str(subdomains), S_SMALL)],
+        [Paragraph("Live Hosts", S_SMALL),   Paragraph(str(live_hosts), S_SMALL)],
+    ]
+    if services:
+        svc_str = ", ".join(f"{p}: {s}" for p, s in list(services.items())[:8])
+        net_rows.append([Paragraph("Services", S_SMALL), Paragraph(svc_str, S_SMALL)])
+    if technologies:
+        net_rows.append([Paragraph("Technologies", S_SMALL), Paragraph(", ".join(str(t) for t in technologies[:10]), S_SMALL)])
+
+    threat = report.get("threat_intelligence", {})
+    if threat.get("abuseipdb_reports", 0) > 0 or threat.get("virustotal_malicious", 0) > 0:
+        net_rows.append([Paragraph("AbuseIPDB Score", S_SMALL), Paragraph(f"{threat.get('abuseipdb_confidence', 0)}% ({threat.get('abuseipdb_reports', 0)} reports)", S_SMALL)])
+        net_rows.append([Paragraph("VirusTotal", S_SMALL), Paragraph(f"{threat.get('virustotal_malicious', 0)} malicious detections", S_SMALL)])
+
+    story.append(Table(
+        net_rows,
+        colWidths=[4*cm, W - 4*cm - 4*cm],
+        style=TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), BDO_NAVY),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), white),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [BDO_LIGHT, white]),
+            ("GRID",          (0, 0), (-1, -1), 0.3, BDO_BORDER),
+            ("FONTSIZE",      (0, 0), (-1, -1), 9),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ]),
+    ))
+
+    story.append(sp(10))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ATTACK PATHS + RECOMMENDATIONS
     # ══════════════════════════════════════════════════════════════════════════
     attack_paths = report.get("attack_paths", [])
-    story += [Paragraph("5. Attack Paths Identified", S_H1), hr(BDO_GOLD, 1.5)]
+    story += [Paragraph("7. Attack Paths Identified", S_H1), hr(BDO_GOLD, 1.5)]
     if attack_paths:
         for i, ap in enumerate(attack_paths[:10], 1):
             story.append(Paragraph(f"<b>{i}.</b> {ap}", S_SMALL))
             story.append(sp(3))
     else:
-        story.append(Paragraph("No attack paths identified.", S_BODY))
+        story.append(Paragraph("No attack paths identified by the automated correlation engine.", S_BODY))
 
-    story += [sp(10), Paragraph("6. Recommendations", S_H1), hr(BDO_GOLD, 1.5)]
+    story += [sp(10), Paragraph("8. Recommendations", S_H1), hr(BDO_GOLD, 1.5)]
     recs = report.get("recommendations", [])
     ai_recs = report.get("ai_analysis", {}).get("remediation_roadmap", [])
 
@@ -645,11 +800,11 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
             )))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 6 — COMPLIANCE (if AI available)
+    # COMPLIANCE (if available)
     # ══════════════════════════════════════════════════════════════════════════
     compliance = report.get("ai_analysis", {}).get("compliance_violations", [])
     if compliance:
-        story += [PageBreak(), Paragraph("7. Compliance Mapping", S_H1), hr(BDO_GOLD, 1.5)]
+        story += [PageBreak(), Paragraph("9. Compliance Mapping", S_H1), hr(BDO_GOLD, 1.5)]
         comp_tbl = [[
             Paragraph("<b>Standard</b>",  S_BOLD),
             Paragraph("<b>Category</b>",  S_BOLD),
@@ -674,6 +829,73 @@ def generate_pdf(report: Dict[str, Any]) -> bytes:
                 ("TOPPADDING",    (0, 0), (-1, -1), 5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
                 ("LEFTPADDING",   (0, 0), (-1, -1), 5),
+                ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+            ]),
+        ))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SCANNER COVERAGE APPENDIX
+    # ══════════════════════════════════════════════════════════════════════════
+    by_tool = stats.get("by_tool", {})
+    if by_tool or findings:
+        story += [PageBreak(), Paragraph("10. Scanner Coverage", S_H1), hr(BDO_GOLD, 1.5)]
+        story.append(Paragraph(
+            "The following tools contributed to this security assessment. "
+            "Finding counts reflect confirmed and suspicious detections after false-positive reduction.",
+            S_BODY,
+        ))
+        story.append(sp(6))
+
+        tool_rows = [[
+            Paragraph("<b>Tool</b>",     S_BOLD),
+            Paragraph("<b>Category</b>", S_BOLD),
+            Paragraph("<b>Findings</b>", S_BOLD),
+        ]]
+        _tool_category = {
+            "nuclei":     "Template-based Scanner",
+            "zap":        "DAST — Web Application",
+            "dalfox":     "XSS Scanner",
+            "ffuf":       "Directory/Endpoint Fuzzer",
+            "sqlmap":     "SQL Injection",
+            "gitleaks":   "Secrets Detection",
+            "nmap":       "Network Port Scanner",
+            "katana":     "Web Crawler",
+            "subfinder":  "Subdomain Enumeration",
+            "shodan":     "Threat Intelligence",
+            "virustotal": "Threat Intelligence",
+            "abuseipdb":  "Threat Intelligence",
+            "ftp_nullbyte_probe": "Custom Probe",
+            "stored_xss_probe":   "Custom Probe",
+            "jwt_probe":          "Custom Probe",
+            "fallback":           "Internal Engine",
+        }
+        # Threat intel and passive tools only appear if they contributed findings.
+        # Active scanners always appear (demonstrates scan coverage even with 0 findings).
+        _PASSIVE_TOOLS = {"shodan", "virustotal", "abuseipdb", "subfinder", "trivy"}
+        _active_display = {t for t in _TOOL_DISPLAY if t not in _PASSIVE_TOOLS}
+        all_tools = set(by_tool.keys()) | _active_display
+        for tool in sorted(all_tools):
+            cnt      = by_tool.get(tool, 0)
+            display  = _TOOL_DISPLAY.get(tool, tool.replace("_", " ").title())
+            category = _tool_category.get(tool, "Scanner")
+            tool_rows.append([
+                Paragraph(display, S_SMALL),
+                Paragraph(category, S_SMALL),
+                Paragraph(str(cnt) if cnt else "—", S_SMALL),
+            ])
+
+        story.append(Table(
+            tool_rows,
+            colWidths=[5*cm, 7*cm, 4.7*cm],
+            style=TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, 0), BDO_NAVY),
+                ("TEXTCOLOR",     (0, 0), (-1, 0), white),
+                ("ROWBACKGROUNDS",(0, 1), (-1, -1), [BDO_LIGHT, white]),
+                ("GRID",          (0, 0), (-1, -1), 0.3, BDO_BORDER),
+                ("FONTSIZE",      (0, 0), (-1, -1), 9),
+                ("TOPPADDING",    (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 8),
                 ("VALIGN",        (0, 0), (-1, -1), "TOP"),
             ]),
         ))

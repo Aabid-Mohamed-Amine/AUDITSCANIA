@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 app = FastAPI(title="Nuclei Scanner Microservice", version="2.0.0")
 
-# â”€â”€ Base tags always included for any web target â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Base tags always included for any web target â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 # These cover the most common, highest-value findings regardless of tech stack
 _BASE_WEB_TAGS: List[str] = [
     "exposures",          # exposed sensitive files (.env, keys, creds, backups)
@@ -33,7 +33,7 @@ _BASE_NETWORK_TAGS: List[str] = [
     "default-logins",
 ]
 
-# â”€â”€ Technology â†’ Nuclei tags mapping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Technology â†’ Nuclei tags mapping â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 _TECH_TAGS: Dict[str, List[str]] = {
     # CMS
     "WordPress":    ["wordpress", "cve", "wp-plugin", "misconfiguration"],
@@ -110,7 +110,7 @@ _TECH_TAGS: Dict[str, List[str]] = {
     "Kafka":        ["kafka", "network"],
 }
 
-# â”€â”€ Scan category â†’ tags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Scan category â†’ tags â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 _CATEGORY_TAGS: Dict[str, List[str]] = {
     "exposures":       ["exposures", "exposure"],
     "misconfigurations":["misconfiguration", "misconfig"],
@@ -151,7 +151,7 @@ class ScanRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Tech detection (Python httpx â€” no binary dependency)
+# Tech detection (Python httpx — no binary dependency)
 # ---------------------------------------------------------------------------
 
 
@@ -292,11 +292,11 @@ def _build_base_cmd(output_path: str, severity: str) -> List[str]:
         "-silent",
         "-no-color",
         "-no-interactsh",
-        "-timeout",         "8",
+        "-timeout",         "10",
         "-max-host-error",  "3",
-        "-rate-limit",      "10",
-        "-bulk-size",       "5",
-        "-c",               "10",
+        "-rate-limit",      "50",
+        "-bulk-size",       "25",
+        "-c",               "25",
         "-retries",         "1",
         "-exclude-tags",    "network,ssl,dns,file,code",
     ]
@@ -322,7 +322,8 @@ def _build_cmd_templates(
         cmd.extend(["-l", targets_file])
     else:
         cmd.extend(["-u", req.target])
-    cmd += ["-t", "http/misconfiguration/"]
+    # v10 templates removed http/misconfiguration/ — use exposures + exposed-panels instead
+    cmd += ["-t", "http/exposures/", "-t", "http/exposed-panels/"]
     _add_auth_flags(cmd, req.headers, req.cookies)
     return cmd
 
@@ -394,15 +395,46 @@ def _slim_finding(raw: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+_TEMPLATES_CANDIDATES = [
+    os.path.expanduser("~/nuclei-templates"),
+    os.path.expanduser("~/.local/nuclei-templates"),
+    os.path.expanduser("~/.local/share/nuclei-templates"),
+]
+
+
+def _templates_ready() -> bool:
+    for path in _TEMPLATES_CANDIDATES:
+        try:
+            if len(os.listdir(path)) > 10:
+                return True
+        except FileNotFoundError:
+            pass
+    return False
+
+
 @app.get("/health")
-async def health() -> Dict[str, str]:
-    return {"status": "ok", "service": "nuclei"}
+async def health() -> Dict[str, Any]:
+    ready = _templates_ready()
+    return {"status": "ok", "service": "nuclei", "templates_ready": ready}
 
 
 @app.post("/scan")
 async def scan(req: ScanRequest) -> Dict[str, Any]:
+    if not _templates_ready():
+        logger.warning("Nuclei templates not yet downloaded — waiting up to 120s")
+        for _ in range(24):
+            await asyncio.sleep(5)
+            if _templates_ready():
+                logger.info("Templates now available, starting scan")
+                break
+        else:
+            logger.error("Templates still missing after 120s — scan aborted")
+            return {
+                "target": req.target, "error": "Nuclei templates not downloaded yet — retry in a few minutes",
+                "findings": [], "total": 0, "by_severity": {},
+            }
     logger.info(
-        "Scan started â€” target=%s severity=%s templates=%d tags=%s tech=%s",
+        "Scan started — target=%s severity=%s templates=%d tags=%s tech=%s",
         req.target, req.severity,
         len(req.templates or []),
         req.tags,
@@ -420,7 +452,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "error":           None,
     }
 
-    # â€”â€” 1. Tech detection if not provided â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
+    # —— 1. Tech detection if not provided ———————————————————————————
     tech_stack = req.tech_stack or []
     if not tech_stack and _is_web_target(req.target):
         try:
@@ -430,7 +462,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         except Exception as exc:
             logger.warning("Tech detection failed: %s", exc)
 
-    # â€”â€” 2. Build tag set â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
+    # —— 2. Build tag set ————————————————————————————————————
     tags = _build_tag_set(
         req_tags        = req.tags,
         tech_stack      = tech_stack,
@@ -440,7 +472,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     result["tags_used"] = tags
     logger.info("Final Nuclei tags (%d): %s", len(tags), tags)
 
-    # â€”â€” 3. Build targets file â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
+    # —— 3. Build targets file ——————————————————————————————————
     targets_file: Optional[str] = None
     if req.extra_targets:
         all_targets = [req.target] + [t for t in req.extra_targets if t and t != req.target]
@@ -460,7 +492,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     useful_tags = [t for t in tags if t not in _GENERIC_TAGS]
     if len(useful_tags) < 2:
         logger.info(
-            "[Nuclei] cmd2 skipped â€” only %d useful tags after filtering generic tags (http, javascript)",
+            "[Nuclei] cmd2 skipped — only %d useful tags after filtering generic tags (http, javascript)",
             len(useful_tags),
         )
         cmd2: Optional[List[str]] = None
@@ -496,15 +528,15 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             if stderr_text:
                 logger.debug("Nuclei %s stderr: %s", label, stderr_text[:300])
             if proc.returncode == 2:
-                # exit 2 = target unresponsive/skipped â€” rÃ©sultats partiels conservÃ©s
+                # exit 2 = target unresponsive/skipped — rÃ©sultats partiels conservÃ©s
                 logger.warning("[Nuclei] %s exited with code 2 (target unresponsive or no templates matched)", label)
             elif proc.returncode not in (0, 1):
-                errors.append(f"{label}: exit {proc.returncode} â€” {stderr_text[:200]}")
+                errors.append(f"{label}: exit {proc.returncode} — {stderr_text[:200]}")
         except asyncio.TimeoutError:
             try: proc.kill()
             except Exception: pass
-            # RÃ©sultats partiels dÃ©jÃ  streamÃ©s dans le fichier de sortie â€” pas un Ã©chec total
-            logger.warning("[Nuclei] cmd timeout 90s â€” rÃ©sultats partiels conservÃ©s (%s)", label)
+            # RÃ©sultats partiels dÃ©jÃ  streamÃ©s dans le fichier de sortie — pas un Ã©chec total
+            logger.warning("[Nuclei] cmd timeout %ds — résultats partiels conservés (%s)", _CMD_TIMEOUT, label)
         except Exception as exc:
             errors.append(f"{label}: {exc}")
             logger.exception("Nuclei %s failed for %s", label, req.target)
@@ -518,7 +550,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     if errors:
         result["error"] = " | ".join(errors)
 
-    # â€”â€” 5. Parse + fusion + dÃ©duplication par template_id â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
+    # —— 5. Parse + fusion + dÃ©duplication par template_id —————————————
     findings: List[Dict[str, Any]] = []
     seen_template_ids: set = set()
 
@@ -568,7 +600,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     })
 
     logger.info(
-        "Scan complete â€” target=%s findings=%d critical=%d high=%d tags=%d",
+        "Scan complete — target=%s findings=%d critical=%d high=%d tags=%d",
         req.target, len(findings),
         result["by_severity"].get("critical", 0),
         result["by_severity"].get("high", 0),

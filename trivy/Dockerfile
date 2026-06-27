@@ -11,13 +11,12 @@ COPY --from=trivy-binary /usr/local/bin/trivy /usr/local/bin/trivy
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout=120 -r requirements.txt
+RUN pip config set global.timeout 300 \
+    && pip config set global.retries 5
+RUN pip install --no-cache-dir --timeout=300 --retries=5 -r requirements.txt
 
 COPY main.py .
 
 EXPOSE 9005
-
-# Pre-warm Trivy vulnerability DB
-RUN trivy image --download-db-only --no-progress 2>/dev/null || true
 
 CMD ["python", "main.py"]

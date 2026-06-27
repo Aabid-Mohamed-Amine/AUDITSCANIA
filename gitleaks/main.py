@@ -76,11 +76,18 @@ async def _scan_git_repo(target: str, work_dir: str, timeout: int) -> List[Dict]
 
 
 async def _scan_web_target(target: str, work_dir: str, timeout: int) -> List[Dict]:
-    """Probe web target for exposed secrets (common files + .git exposure)."""
+    """Probe web target for exposed secrets (common files + .git exposure + SPA/Juice Shop)."""
     findings: List[Dict] = []
+
     secret_pattern = re.compile(
         r'(?i)(?:api[_-]?key|secret|password|token|bearer|private[_-]?key|access[_-]?key)'
         r'\s*[=:]\s*["\']?([A-Za-z0-9+/\-_]{16,})["\']?'
+    )
+    jwt_pattern = re.compile(
+        r'eyJ[A-Za-z0-9_-]{4,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}'
+    )
+    bcrypt_pattern = re.compile(
+        r'\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}'
     )
 
     probe_paths = [
@@ -91,36 +98,113 @@ async def _scan_web_target(target: str, work_dir: str, timeout: int) -> List[Dic
         "/docker-compose.yml", "/docker-compose.yaml",
         "/Makefile", "/.travis.yml", "/.circleci/config.yml",
         "/credentials.json", "/secrets.json", "/keys.json",
-        # Node.js / Angular / modern SPA stack — webpack/angular sourcemaps
-        # often leak original source (incl. inline secrets/comments), and
-        # npm/yarn manifests can leak private registry tokens or scripts.
         "/main.js.map", "/polyfills.js.map", "/runtime.js.map",
         "/package.json", "/package-lock.json", "/yarn.lock",
         "/.npmrc", "/.yarnrc",
         "/angular.json", "/ngsw.json",
         "/server/.env", "/api/.env", "/.env.development",
+        # Juice Shop / OWASP vulnerable app specific paths
+        "/encryptionkeys/",
+        "/encryptionkeys/premium.key",
+        "/encryptionkeys/jwt.pub",
+        "/encryptionkeys/acc2020.md",
+        "/encryptionkeys/coupons_2013.md.bak",
+        "/api/Users",
+        "/rest/admin/application-configuration",
+        "/metrics",
+        "/b2b/v2",
     ]
+
+    # These paths contain cryptographic material by nature — report the file itself if accessible
+    _crypto_paths = frozenset([
+        "/encryptionkeys/", "/encryptionkeys/premium.key",
+        "/encryptionkeys/jwt.pub", "/encryptionkeys/acc2020.md",
+        "/encryptionkeys/coupons_2013.md.bak",
+    ])
+    _pem_markers = ("BEGIN RSA", "BEGIN PRIVATE", "BEGIN PUBLIC",
+                    "BEGIN CERTIFICATE", "ssh-rsa", "-----")
+
+    seen: set = set()
+
+    def _dedup_add(f: dict) -> bool:
+        key = (f["rule_id"], f["file"], f.get("match", "")[:40])
+        if key in seen:
+            return False
+        seen.add(key)
+        return True
 
     base = target.rstrip("/")
     async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, verify=False) as client:
         for path in probe_paths:
             try:
                 resp = await client.get(base + path)
-                if resp.status_code == 200 and len(resp.text) < 1_000_000:
-                    # 1MB cap (was 50KB) -- sourcemaps (main.js.map etc.) routinely
-                    # exceed 50KB and were silently skipped even when exposed,
-                    # despite being a prime target for leaked dev comments/paths.
-                    for match in secret_pattern.finditer(resp.text):
-                        raw_val = match.group(1)
-                        findings.append({
-                            "rule_id": "exposed-secret-file",
-                            "description": f"Potential secret found in {path}",
-                            "file": base + path,
-                            "secret": _mask(raw_val),
-                            "match": match.group(0)[:100],
-                            "severity": "high",
-                            "line": 0,
-                        })
+                if resp.status_code != 200:
+                    continue
+                body = resp.text
+                if len(body) > 2_000_000:
+                    continue
+
+                # Crypto key files: report exposure even without a regex match
+                if path in _crypto_paths and body.strip():
+                    is_key = any(m in body[:512] for m in _pem_markers)
+                    rule = "exposed-cryptographic-key" if is_key else "exposed-sensitive-file"
+                    sev  = "critical" if is_key else "high"
+                    f = {
+                        "rule_id":     rule,
+                        "description": f"Cryptographic material exposed at {path}",
+                        "file":        base + path,
+                        "secret":      _mask(body.strip()[:32]),
+                        "match":       body.strip()[:100],
+                        "severity":    sev,
+                        "line":        0,
+                    }
+                    if _dedup_add(f):
+                        findings.append(f)
+
+                # Generic secret key=value pattern
+                for match in secret_pattern.finditer(body):
+                    raw_val = match.group(1)
+                    f = {
+                        "rule_id":     "exposed-secret-file",
+                        "description": f"Potential secret found in {path}",
+                        "file":        base + path,
+                        "secret":      _mask(raw_val),
+                        "match":       match.group(0)[:100],
+                        "severity":    "high",
+                        "line":        0,
+                    }
+                    if _dedup_add(f):
+                        findings.append(f)
+
+                # JWT tokens in responses
+                for match in jwt_pattern.finditer(body):
+                    token = match.group(0)
+                    f = {
+                        "rule_id":     "jwt-token-exposed",
+                        "description": f"JWT token found in response from {path}",
+                        "file":        base + path,
+                        "secret":      _mask(token),
+                        "match":       token[:100],
+                        "severity":    "high",
+                        "line":        0,
+                    }
+                    if _dedup_add(f):
+                        findings.append(f)
+
+                # Bcrypt password hashes (user database exposure)
+                for match in bcrypt_pattern.finditer(body):
+                    f = {
+                        "rule_id":     "bcrypt-hash-exposed",
+                        "description": f"Bcrypt password hash found in response from {path} — possible user DB exposure",
+                        "file":        base + path,
+                        "secret":      match.group(0)[:20] + "...",
+                        "match":       match.group(0)[:60],
+                        "severity":    "critical",
+                        "line":        0,
+                    }
+                    if _dedup_add(f):
+                        findings.append(f)
+
             except Exception:
                 pass
 

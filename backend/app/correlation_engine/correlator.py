@@ -563,36 +563,51 @@ def correlate(
     # ── Phase SQLMap : Findings SQLMap (injection confirmée) ────────────────────
     for idx, sf in enumerate(sqlmap_data.get("findings", [])):
         port        = _extract_port_from_url(sf.get("target_url", ""))
-        attack_path = f"SQLi confirmed: {sf.get('target_url', '')} → {sf.get('description', '')}"
+        sev         = sf.get("severity", "high")
+        # CVSS v3.1 for SQL injection: AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H = 9.8
+        # Auth-bypass SQLi: Critical (CWE-89 + CWE-287) → 9.8
+        # Standard SQLi: Critical → 9.8 (network-exploitable, no auth required)
+        cvss_sqli   = 9.8 if sev == "critical" else 8.8
+        attack_path = f"SQLi confirmed: {sf.get('target_url', '')} — param={sf.get('parameter', '')} [{sf.get('technique', '')}]"
         attack_paths.append(attack_path)
 
         findings.append({
             "id":                   f"sqlmap-{idx}",
             "type":                 "vulnerability",
             "title":                sf.get("title", "SQL Injection"),
-            "severity":             sf.get("severity", "high"),
+            "severity":             sev,
             "sources":              ["sqlmap"],
-            "affected_service":     "",
+            "affected_service":     "web",
             "affected_port":        port,
             "cve_ids":              [],
-            "cwe_ids":              sf.get("cwe_ids", []),
-            "cvss_score":           None,
+            "cwe_ids":              sf.get("cwe_ids", ["CWE-89"]),
+            "cvss_score":           cvss_sqli,
             "epss_score":           None,
-            "tags":                 ["sqli", "injection"],
-            "exploitability_score": 95.0,
-            "confidence_score":     0.95,
-            "attack_path":          f"SQL Injection on {sf.get('parameter', '')} → {sf.get('description', '')}",
-            "matched_at":           sf.get("target_url", ""),
+            "tags":                 ["sqli", "injection", "confirmed"],
+            "exploitability_score": 98.0,
+            "confidence_score":     0.98,
+            "evidence":             {
+                "parameter": sf.get("parameter", ""),
+                "technique":  sf.get("technique", ""),
+                "payload":    sf.get("payload_example", ""),
+                "dbms":       sf.get("dbms", ""),
+                "target_url": sf.get("target_url", ""),
+            },
+            "attack_path":  attack_path,
+            "matched_at":   sf.get("target_url", ""),
         })
 
     # ── IDOR / Broken Access Control findings ────────────────────────────────
     for idx, idf in enumerate(idor_data.get("findings", [])):
         port = _extract_port_from_url(idf.get("target_url", ""))
-        sev = idf.get("severity", "high")
-        exploit = 95.0 if sev == "critical" else 80.0
+        sev  = idf.get("severity", "high")
+        # CVSS v3.1 IDOR: AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N = 6.5
+        # With data modification: AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N = 8.1
+        cvss_idor = 8.1 if sev in ("critical", "high") else 6.5
+        exploit   = 95.0 if sev == "critical" else 82.0
         attack_path = (
-            f"IDOR confirmed: {idf.get('target_url', '')} -- "
-            f"{idf.get('evidence', 'cross-account data access')}"
+            f"IDOR confirmed: {idf.get('target_url', '')} — "
+            f"user A token accessed user B resource — {idf.get('evidence', 'cross-account data access')}"
         )
         attack_paths.append(attack_path)
 
@@ -602,82 +617,87 @@ def correlate(
             "title":                idf.get("title", "IDOR: Unauthorized cross-account access"),
             "severity":             sev,
             "sources":              ["idor_tester"],
-            "affected_service":     "",
+            "affected_service":     "web-api",
             "affected_port":        port,
             "cve_ids":              [],
             "cwe_ids":              idf.get("cwe_ids", ["CWE-639", "CWE-284"]),
-            "cvss_score":           None,
+            "cvss_score":           cvss_idor,
             "epss_score":           None,
-            "tags":                 ["idor", "broken_access_control", "authorization"],
+            "tags":                 ["idor", "broken_access_control", "authorization", "confirmed"],
             "exploitability_score": exploit,
-            "confidence_score":     0.95,
+            "confidence_score":     0.97,
+            "evidence":             idf.get("evidence", ""),
             "attack_path":          attack_path,
             "matched_at":           idf.get("target_url", ""),
-            "evidence":             idf.get("evidence", ""),
         })
 
-    # ── Phase F : Scores agrégés ──────────────────────────────────────────────
+    # ── Phase F : Lab challenges — contexte informatif uniquement ───────────────
+    # Lab challenges (OWASP Juice Shop /api/Challenges) sont des MÉTADONNÉES
+    # de l'application, pas des vulnérabilités confirmées par test actif.
+    # Ils ne sont PAS ajoutés aux findings correlated pour ne pas gonfler
+    # les scores ni le rapport avec des résultats non prouvés.
+    # Ils apparaissent dans lab_context (section annexe du rapport).
+    # matched_lab_challenges contient UNIQUEMENT ceux confirmés par un scanner actif.
+    lab_context: Dict[str, Any] = {}
+    matched_lab_challenges: List[Dict[str, Any]] = []
 
-    # Lab challenge APIs (for intentionally vulnerable training targets such as
-    # OWASP Juice Shop) expose challenge metadata that is faster and more
-    # reliable than waiting for generic scanners to infer each weakness.
-    # When lab_mode=False, lab_challenges_data has skipped=True / detected=False
-    # → this block is naturally skipped; no lab findings or attack paths generated.
-    if lab_challenges_data.get("skipped"):
-        logger.info("[Correlator] Lab Challenge API skippée (lab_mode=false) — corrélation active uniquement")
     if lab_challenges_data.get("detected"):
-        endpoint = lab_challenges_data.get("endpoint", "")
         platform = lab_challenges_data.get("platform") or "vulnerable lab"
-        port = _extract_port_from_url(endpoint) or 80
-        for idx, challenge in enumerate(lab_challenges_data.get("challenges", [])[:40]):
-            try:
-                difficulty = int(challenge.get("difficulty") or 0)
-            except (TypeError, ValueError):
-                difficulty = 0
-            severity = (
-                "critical" if difficulty >= 6
-                else "high"   if difficulty >= 5
-                else "medium" if difficulty >= 3
-                else "low"
-            )
-            exploit = (
-                95.0 if severity == "critical"
-                else 75.0 if severity == "high"
-                else 55.0 if severity == "medium"
-                else 30.0
-            )
-            name = challenge.get("name") or f"Challenge #{idx + 1}"
-            category = challenge.get("category") or "lab"
-            challenge_id = challenge.get("id") or idx + 1
-            attack_path = _build_attack_path(
-                port, service_map.get(port), [], None, "web_vulnerability",
-                f"{platform} challenge metadata: {name}",
-            )
-            attack_paths.append(attack_path)
+        all_challenges = lab_challenges_data.get("challenges", [])
 
-            findings.append({
-                "id":                   f"lab-challenge-{challenge_id}",
-                "type":                 "lab_challenge",
-                "title":                f"{platform} challenge detected: {name}",
-                "severity":             severity,
-                "sources":              ["lab_challenge_api"],
-                "affected_service":     "web-lab",
-                "affected_port":        port,
-                "cve_ids":              [],
-                "cwe_ids":              [],
-                "cvss_score":           None,
-                "epss_score":           None,
-                "tags":                 ["web", "lab", str(category).lower()],
-                "exploitability_score": exploit,
-                "confidence_score":     0.95,
-                "attack_path":          attack_path,
-                "matched_at":           endpoint,
-                "lab_metadata":         challenge,
-            })
-            endpoint_risk_ranking.append({
-                "url": endpoint, "status": 200, "severity": severity,
-                "category": "lab_challenge", "risk_score": exploit,
-            })
+        # Build keyword index from active scanner findings for cross-referencing
+        _active_titles_lower = [
+            f.get("title", "").lower() for f in findings
+            if f.get("type") not in ("lab_challenge",)
+               and f.get("sources") != ["lab_challenge_api"]
+        ]
+        _active_tags_lower = [
+            t.lower()
+            for f in findings
+            for t in f.get("tags", [])
+            if f.get("type") not in ("lab_challenge",)
+        ]
+        _CATEGORY_TO_TAGS: Dict[str, List[str]] = {
+            "sql injection":             ["sqli", "sql", "injection"],
+            "xss":                       ["xss", "cross-site scripting"],
+            "broken access control":     ["idor", "access_control", "authorization"],
+            "broken authentication":     ["auth", "jwt", "token", "login"],
+            "sensitive data exposure":   ["exposure", "data", "sensitive"],
+            "security misconfiguration": ["misconfig", "cors", "headers"],
+            "vulnerable components":     ["cve", "vulnerability"],
+            "improper input validation": ["injection", "input", "validation"],
+        }
+
+        for challenge in all_challenges:
+            name     = (challenge.get("name") or "").lower()
+            category = (challenge.get("category") or "").lower()
+            cat_tags = _CATEGORY_TO_TAGS.get(category, [category.replace(" ", "_")])
+
+            confirmed = (
+                any(name in t or any(kw in t for kw in cat_tags) for t in _active_titles_lower)
+                or any(tag in _active_tags_lower for tag in cat_tags)
+            )
+            if confirmed:
+                matched_lab_challenges.append({
+                    **challenge,
+                    "confirmed_by": [
+                        f.get("sources", []) for f in findings
+                        if any(kw in f.get("title", "").lower() for kw in [name] + cat_tags)
+                    ][:3],
+                })
+
+        lab_context = {
+            "platform":  platform,
+            "total":     len(all_challenges),
+            "endpoint":  lab_challenges_data.get("endpoint", ""),
+            "note":      "Known challenge list — informational only, not confirmed by active scanning",
+        }
+        logger.info(
+            "[Correlator] Lab challenges: %d total, %d matched by active scanners",
+            len(all_challenges), len(matched_lab_challenges),
+        )
+    elif lab_challenges_data.get("skipped"):
+        logger.info("[Correlator] Lab Challenge API skippée (lab_mode=false) — corrélation active uniquement")
 
     # Exploitability: weighted blend of top score + average
     exploit_scores = [f.get("exploitability_score", 0.0) for f in findings]
@@ -743,24 +763,34 @@ def correlate(
     # Sort endpoint risk ranking by risk_score descending
     endpoint_risk_ranking.sort(key=lambda x: x["risk_score"], reverse=True)
 
+    # Findings confirmed by active scanners only (no lab_challenge type)
+    active_findings = [f for f in findings if f.get("type") != "lab_challenge"]
+    by_severity_active: Dict[str, int] = {}
+    for f in active_findings:
+        sev = f.get("severity", "info")
+        by_severity_active[sev] = by_severity_active.get(sev, 0) + 1
+
     return {
-        "correlated_findings":    findings,
+        "correlated_findings":    active_findings,
         "service_vuln_map":       {k: list(set(v)) for k, v in service_vuln_map.items()},
         "attack_paths":           unique_paths[:30],
         "endpoint_risk_ranking":  endpoint_risk_ranking[:20],
         "exploitability_score":   round(exploitability_score, 2),
         "confidence_score":       round(confidence_score, 2),
         "threat_intel_factor":    round(threat_intel_factor, 2),
-        "total_findings":         len(findings),
-        "by_severity":            by_severity,
+        "total_findings":         len(active_findings),
+        "by_severity":            by_severity_active,
         "correlated_sources":     correlated_sources,
+        "lab_context":            lab_context,
+        "matched_lab_challenges": matched_lab_challenges,
         "generated_at":           datetime.utcnow().isoformat(),
         "summary": (
-            f"{len(findings)} correlated findings "
-            f"(critical={by_severity.get('critical', 0)}, "
-            f"high={by_severity.get('high', 0)}, "
-            f"medium={by_severity.get('medium', 0)}) | "
+            f"{len(active_findings)} correlated findings "
+            f"(critical={by_severity_active.get('critical', 0)}, "
+            f"high={by_severity_active.get('high', 0)}, "
+            f"medium={by_severity_active.get('medium', 0)}) | "
             f"exploitability={exploitability_score:.0f}/100 | "
             f"confidence={confidence_score:.0f}%"
+            + (f" | {len(matched_lab_challenges)} lab challenges confirmed" if matched_lab_challenges else "")
         ),
     }

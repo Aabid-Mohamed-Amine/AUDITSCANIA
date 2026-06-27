@@ -99,7 +99,7 @@ def _parse_report(report_path: str, target: str) -> List[Dict[str, Any]]:
 
     base = _normalise_base(target)
 
-    for section in ("vulnerabilities", "anomalies"):
+    for section in ("vulnerabilities", "anomalies", "additionals"):
         section_data = data.get(section, {})
         if not isinstance(section_data, dict):
             continue
@@ -145,6 +145,7 @@ def _parse_report(report_path: str, target: str) -> List[Dict[str, Any]]:
 class ScanRequest(BaseModel):
     target:  str
     timeout: int = 120
+    headers: Optional[Dict[str, str]] = None
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -164,18 +165,31 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
 
     resolved_url, original_hostname, ip, port = _resolve_target(target)
 
-    # ── Wapiti 3.3.0 — options correctes ─────────────────────────────────────
-    # --max-depth    → -d
-    # --timeout      → -t
-    # --max-scan-time → borne le scan global
+    # Detect internal hostname — "domain" scope fails on bare hostnames like "juiceshop"
+    _parsed_host = urlparse(resolved_url)
+    _hostname = _parsed_host.hostname or ""
+    is_internal = (
+        "." not in _hostname or
+        _hostname.endswith((".local", ".internal", ".lan"))
+    )
+    scope = "url" if is_internal else "domain"
+
     cmd: List[str] = [
         "wapiti",
         "-u",    resolved_url,
         "--header", f"Host: {original_hostname}",
-        "-d",    "2",
-        "-t",    "15",
-        "--max-links-per-page", "30",
-        "--max-scan-time", str(timeout),
+    ]
+    auth_token = (req.headers or {}).get("Authorization", "")
+    if auth_token:
+        cmd += ["--header", f"Authorization: {auth_token}"]
+    cmd += [
+        "--scope", scope,
+        "-d",    "3",
+        "-m",    "sql,xss,ssrf,xxe,htaccess,backup,redirect,shellshock,wapp,csrf,brute_login_form,http_headers",
+        "--max-links-per-page", "50",
+        "--max-files-per-dir",  "20",
+        "--max-scan-time",      "120",
+        "--max-attack-time",    "60",
         "--no-bugreport",
         "--flush-session",
         "-f",    "json",
@@ -183,8 +197,8 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     ]
 
     logger.info(
-        "[Wapiti] scan start: %s → %s (host=%s, timeout=%ds, report=%s)",
-        target, resolved_url, original_hostname, timeout, report_path,
+        "[Wapiti] scan start: %s -> %s (host=%s, scope=%s, auth=%s, timeout=%ds, report=%s)",
+        target, resolved_url, original_hostname, scope, bool(auth_token), timeout, report_path,
     )
     logger.info("[Wapiti] cmd: %s", " ".join(cmd))
 
@@ -207,6 +221,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             _cleanup(report_path)
             return {
                 "target":      target,
+                "scope":       scope,
                 "error":       f"Wapiti timed out after {timeout}s (partial: {len(findings)} findings)",
                 "findings":    findings,
                 "total":       len(findings),
@@ -228,7 +243,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             err = f"Wapiti exited {proc.returncode}: {stderr_txt[:300]}"
             logger.warning("[Wapiti] %s", err)
             return {
-                "target": target, "error": err,
+                "target": target, "scope": scope, "error": err,
                 "findings": [], "total": 0, "by_severity": {},
             }
 
@@ -237,11 +252,12 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         _cleanup(report_path)
 
         logger.info(
-            "[Wapiti] scan complete: %s — %d finding(s) %s",
-            target, len(findings), by_severity,
+            "[Wapiti] scan complete: %s scope=%s -- %d finding(s) %s",
+            target, scope, len(findings), by_severity,
         )
         return {
             "target":      target,
+            "scope":       scope,
             "error":       None,
             "findings":    findings,
             "total":       len(findings),
@@ -251,15 +267,15 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     except FileNotFoundError:
         logger.error("[Wapiti] binary not found in PATH")
         return {
-            "target": target,
-            "error":  "wapiti binary not found — is wapiti installed?",
+            "target": target, "scope": scope,
+            "error":  "wapiti binary not found -- is wapiti installed?",
             "findings": [], "total": 0, "by_severity": {},
         }
     except Exception as exc:
         logger.exception("[Wapiti] unexpected error for %s", target)
         _cleanup(report_path)
         return {
-            "target": target, "error": str(exc),
+            "target": target, "scope": scope, "error": str(exc),
             "findings": [], "total": 0, "by_severity": {},
         }
 

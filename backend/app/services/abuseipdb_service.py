@@ -7,7 +7,9 @@ For domain targets, DNS resolves asynchronously first then queries the resulting
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
 from typing import Any, Dict
 
 import httpx
@@ -19,6 +21,24 @@ logger = logging.getLogger(__name__)
 
 ABUSEIPDB_BASE = "https://api.abuseipdb.com/api/v2"
 
+_INTERNAL_HOST_RE = re.compile(
+    r"^(localhost|.*\.local|.*\.internal|.*\.docker|.*\.test)$", re.IGNORECASE
+)
+
+
+def _is_private_ip(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return False
+
+
+def _is_internal_hostname(host: str) -> bool:
+    # Single-label hostnames (e.g. "juiceshop") are Docker/internal names
+    if "." not in host:
+        return True
+    return bool(_INTERNAL_HOST_RE.match(host))
+
 
 async def query_abuseipdb(target: str) -> Dict[str, Any]:
     """Query AbuseIPDB for abuse reports on the given IP / domain."""
@@ -28,11 +48,27 @@ async def query_abuseipdb(target: str) -> Dict[str, Any]:
         result["error"] = "ABUSEIPDB_API_KEY not configured"
         return result
 
+    # Extract bare hostname from target (strip scheme/port/path)
+    bare = target
+    for scheme in ("https://", "http://"):
+        if bare.lower().startswith(scheme):
+            bare = bare[len(scheme):]
+            break
+    bare = bare.split("/")[0].split(":")[0]
+
+    if _is_internal_hostname(bare):
+        result["error"] = f"Skipped: internal hostname '{bare}' not in AbuseIPDB"
+        return result
+
     try:
         ip = await resolve_hostname(target)
         result["resolved_ip"] = ip
     except Exception as exc:
         result["error"] = f"DNS resolution failed: {exc}"
+        return result
+
+    if _is_private_ip(ip):
+        result["error"] = f"Skipped: private IP {ip} not in AbuseIPDB"
         return result
 
     headers = {

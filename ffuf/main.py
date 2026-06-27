@@ -582,8 +582,8 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         # below copies from), so the flag survives into both result["endpoints"]
         # and result["by_severity"] -- feeding SQLMap/Dalfox downstream.
         _PARAM_PROBE_NAMES = ["id", "q", "search", "page", "sort", "filter", "category"]
-        _probe_candidates = [e for e in endpoints if e.get("status") in (200, 201, 301, 302)][:15]
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, verify=False) as _pclient:
+        _probe_candidates = [e for e in endpoints if e.get("status") in (200, 201, 301, 302)][:5]
+        async with httpx.AsyncClient(timeout=2.0, follow_redirects=True, verify=False) as _pclient:
             for _ep in _probe_candidates:
                 _base_ep_url = _ep.get("url", "")
                 if not _base_ep_url or "?" in _base_ep_url:

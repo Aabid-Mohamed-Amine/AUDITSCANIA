@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Terminal } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Terminal, Maximize2, Minimize2 } from "lucide-react";
 import { type ScanLog } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -19,13 +19,17 @@ const LEVEL_STYLE: Record<string, { prefix: string; color: string }> = {
 
 export default function LiveLogs({ logs, isLive = false }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
   return (
-    <div className="rounded-[6px] overflow-hidden border border-[#0f1e30] bg-[#030810]">
+    <div className={cn(
+      "rounded-[6px] overflow-hidden border border-[#0f1e30] bg-[#030810]",
+      expanded && "fixed inset-0 z-50 flex flex-col rounded-none border-0",
+    )}>
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3 py-2 bg-[#060e1c] border-b border-[#0f1e30]">
         {/* Terminal dots */}
@@ -34,16 +38,39 @@ export default function LiveLogs({ logs, isLive = false }: Props) {
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
         <Terminal className="w-3.5 h-3.5 text-[#2a5070] ml-1" />
         <span className="text-[11px] font-mono text-[#2a5070] tracking-wide">scan.log</span>
+        <span className="text-[10px] font-mono text-gray-500 ml-1">{logs.length} lignes</span>
         {isLive && (
-          <span className="ml-auto flex items-center gap-1.5 text-[10px] font-mono text-emerald-400 tracking-widest">
+          <span className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400 tracking-widest">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             LIVE
           </span>
         )}
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className={cn(
+            "ml-auto transition-colors",
+            expanded
+              ? "flex items-center gap-1.5 px-2 py-1 rounded bg-[#0f1e30] hover:bg-[#1a2e45] text-gray-300 text-[11px] font-mono"
+              : "text-[#2a5070] hover:text-[#4a8ab5]",
+          )}
+          title={expanded ? "Reduire" : "Agrandir"}
+        >
+          {expanded ? (
+            <>
+              <Minimize2 className="w-3.5 h-3.5" />
+              <span>Reduire</span>
+            </>
+          ) : (
+            <Maximize2 className="w-3.5 h-3.5" />
+          )}
+        </button>
       </div>
 
       {/* Log output */}
-      <div className="h-64 overflow-y-auto p-3 font-mono text-[11px] leading-5 space-y-0.5">
+      <div className={cn(
+        "overflow-y-auto p-3 font-mono text-[11px] leading-5 space-y-0.5 transition-all duration-200",
+        expanded ? "flex-1" : "h-64",
+      )}>
         {/* Prompt line */}
         <div className="text-[#1e3a55] select-none mb-1">
           auditscan@scanner:~$ tail -f scan.log

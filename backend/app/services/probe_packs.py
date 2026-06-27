@@ -29,8 +29,8 @@ PROBE_PACKS: Dict[str, Dict[str, Any]] = {
             {
                 "path":   "/rest/user/login",
                 "method": "POST",
-                "params": ["email"],
-                "data":   '{"email":"test@test.com","password":"wrongpass123"}',
+                "params": [],
+                "data":   '{"email":"*","password":"wrongpass123"}',
             },
             {
                 "path":   "/rest/products/search?q=test",

@@ -1,28 +1,30 @@
 """
-Risk Engine — scoring multi-facteurs v4.
+Risk Engine — scoring multi-facteurs v6.
+
+Basé uniquement sur findings CONFIRMÉS par scanners actifs (pas de lab challenges).
 
 Formule pondérée (total = 100%) :
-  Nuclei CVE findings          20%
-  ZAP web vulnerabilities      17%
-  AbuseIPDB threat intel       11%
-  Wapiti web app vulns         13%
-  Exploitability (Correl.)      8%
-  Port exposure                 6%
-  VirusTotal threat intel       7%
-  CVE severity factor           4%
-  Service exposure factor       3%
-  Sensitive endpoints (FFUF)    3%
-  Nikto server misconfigs       6%
-  Network reachability bonus    2%
+  SQLMap SQLi confirmé         22%  ← finding le plus probant
+  Exploitability (Correl.)     18%
+  Nuclei CVE/misconfig         14%
+  ZAP web vulnerabilities      13%
+  IDOR Broken Access Control   10%
+  Nikto server misconfigs       7%
+  Wapiti web app vulns          6%
+  Sensitive endpoints (FFUF)    5%
+  AbuseIPDB threat intel        3%
+  VirusTotal threat intel       2%
                                ───
                                100%
 
-Anti-underestimation guards (v4) :
-  CVE critique (CVSS ≥ 9)  → score min 75
-  AbuseIPDB > 80% ou VT > 50%  → score min 60
-  Service dangereux exposé      → score min 50
-  Corr. high confirmé           → score min 50
-  Corr. critical confirmé       → score min 75
+Guards (findings confirmés uniquement) :
+  SQLi confirmé (f_sqlmap ≥ 80)   → score min 90 (Critical)
+  IDOR confirmé (f_idor ≥ 60)     → score min 70 (High)
+  CVE critique (CVSS ≥ 9)         → score min 75
+  AbuseIPDB > 80% ou VT > 50%     → score min 60
+  Service dangereux exposé        → score min 50
+  Corr. high confirmé             → score min 50
+  Corr. critical confirmé         → score min 75
 """
 from __future__ import annotations
 
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
 
 
 def _f_nuclei(nuclei_data: Dict[str, Any]) -> float:
-    if nuclei_data.get("error") == "Nuclei timeout after 180s":
+    if str(nuclei_data.get("error", "")).startswith("Nuclei timeout after"):
         return 50.0   # timeout != no vulns -- use neutral score
     if nuclei_data.get("error"):
         return 0.0
@@ -219,6 +221,40 @@ def _f_wapiti(wapiti_data: Dict[str, Any]) -> float:
     )
 
 
+def _f_sqlmap(sqlmap_data: Dict[str, Any]) -> float:
+    """SQL injection confirmed by SQLMap — highest severity indicator."""
+    if sqlmap_data.get("skipped") or sqlmap_data.get("error"):
+        return 0.0
+    if not sqlmap_data.get("vulnerable"):
+        return 0.0
+    findings = sqlmap_data.get("findings", [])
+    score = 0.0
+    for f in findings:
+        sev = f.get("severity", "high")
+        if sev == "critical":
+            score += 100.0
+        elif sev == "high":
+            score += 80.0
+        else:
+            score += 50.0
+    return min(score, 100.0)
+
+
+def _f_idor(idor_data: Dict[str, Any]) -> float:
+    """IDOR / Broken Access Control confirmed by cross-account testing."""
+    if idor_data.get("skipped") or idor_data.get("error"):
+        return 0.0
+    total = idor_data.get("total", 0)
+    if total == 0:
+        return 0.0
+    findings = idor_data.get("findings", [])
+    score = 0.0
+    for f in findings:
+        sev = f.get("severity", "high")
+        score += 80.0 if sev in ("critical", "high") else 50.0
+    return min(score, 100.0)
+
+
 # ── Scoring principal ────────────────────────────────────────────────────────
 
 
@@ -259,6 +295,7 @@ def compute_enhanced_risk_score(
     nikto_data   = ctx.get_step_result("nikto")      or {}
     wapiti_data  = ctx.get_step_result("wapiti")     or {}
     idor_data    = ctx.get_step_result("idor")       or {}
+    sqlmap_data  = ctx.get_step_result("sqlmap")     or {}
 
     cr = correlation_report or {}
 
@@ -273,91 +310,87 @@ def compute_enhanced_risk_score(
     f_network   = _f_network_reachability(nmap_data)
     f_nikto     = _f_nikto(nikto_data)
     f_wapiti    = _f_wapiti(wapiti_data)
+    f_sqlmap    = _f_sqlmap(sqlmap_data)
+    f_idor      = _f_idor(idor_data)
 
     # Facteurs du Correlation Engine
     f_exploit    = float(cr.get("exploitability_score", 0.0))
     confidence   = float(cr.get("confidence_score", 50.0))
     threat_intel = float(cr.get("threat_intel_factor", 0.0))
 
-    # Formule pondérée v5 (= 100%)
-    # exploitability monte a 20% (indicateur le plus fiable)
-    # nuclei reduit a 15% (timeout ne doit plus tuer le score)
-    # endpoint_risk monte a 10% (IDOR/sensitive paths importants)
+    # Formule pondérée v6 — basée uniquement sur findings confirmés (= 100%)
+    # SQLMap / IDOR : facteurs dominants car preuves directes (exploit confirmé)
+    # Nuclei/ZAP    : scanners actifs fiables
+    # Nikto/Wapiti  : misconfigs serveur
+    # Threat Intel  : contexte IP (0 pour cibles privées → renormalisé)
     score = (
-        f_exploit   * 0.20
-        + f_nuclei  * 0.15
-        + f_zap     * 0.18
-        + f_endpoints * 0.10
-        + f_nikto   * 0.08
-        + f_abuse   * 0.08
-        + f_vt      * 0.05
-        + f_port    * 0.07
-        + f_cve_sev * 0.05
-        + f_svc_exp * 0.04
+        f_sqlmap    * 0.22    # SQL injection confirmé = indicateur le plus fort
+        + f_exploit * 0.18    # score d'exploitabilité du corrélateur
+        + f_nuclei  * 0.14    # templates CVE / misconfig
+        + f_zap     * 0.13    # alertes web actives
+        + f_idor    * 0.10    # broken access control confirmé
+        + f_nikto   * 0.07    # misconfigs serveur
+        + f_wapiti  * 0.06    # web app vulns
+        + f_endpoints * 0.05  # endpoints sensibles exposés
+        + f_abuse   * 0.03    # threat intel AbuseIPDB
+        + f_vt      * 0.02    # threat intel VirusTotal
     )
 
-    # Renormalize when AbuseIPDB+VirusTotal are structurally zero
-    # (private/internal target IP) -- these factors total 13% (0.08 + 0.05).
-    PRIVATE_IP_TI_WEIGHT = 0.08 + 0.05
+    # Renormalize when AbuseIPDB+VirusTotal are structurally zero (private IP)
+    # These factors total 5% (0.03 + 0.02) in the v6 formula
     if _target_ip_is_private(abuse_data):
-        score = score / (1 - PRIVATE_IP_TI_WEIGHT)
+        score = score / (1 - 0.05)
 
-    # ── Anti-underestimation guards — scanners (CVE / threat intel) ─────────
-    # Critical CVE → score minimum HIGH (75)
+    # ── Guards basés sur findings confirmés uniquement ───────────────────────
+    corr_by_sev = cr.get("by_severity", {})
+
+    # SQLi confirmé → minimum CRITICAL (90)
+    if f_sqlmap >= 80.0:
+        score = max(score, 90.0)
+    # IDOR confirmé → minimum HIGH (70)
+    if f_idor >= 60.0:
+        score = max(score, 70.0)
+    # CVE critique (CVSS ≥ 9) → minimum HIGH (75)
     if f_cve_sev >= 100.0:
         score = max(score, 75.0)
-    # Active abuse/VT signals → au moins MEDIUM-HIGH (60)
+    # Abuse/VT actifs → minimum MEDIUM-HIGH (60)
     if f_abuse > 80.0 or f_vt > 50.0:
         score = max(score, 60.0)
-    # Dangerous exposed services (RDP, telnet, Redis...) → au moins MEDIUM (50)
+    # Services dangereux exposés → minimum MEDIUM (50)
     if f_svc_exp > 70.0:
         score = max(score, 50.0)
-    # Accessible target with open ports and no findings → au moins minimal
+    # Cible joignable avec ports ouverts → minimum minimal (10)
     if f_network > 30.0 and score < 10.0:
         score = 10.0
 
-    # ── Anti-underestimation guards — correlated findings severity ───────────
-    corr_by_sev = cr.get("by_severity", {})
+    # Guards sur findings corrélés confirmés (pas de lab_challenges)
     if corr_by_sev.get("medium", 0) >= 1:
-        score = max(score, 25.0)   # medium confirmed → au moins LOW (25)
+        score = max(score, 25.0)
     if corr_by_sev.get("high", 0) >= 1:
-        score = max(score, 50.0)   # high confirmed   → au moins MEDIUM-HIGH (50)
+        score = max(score, 50.0)
     if corr_by_sev.get("critical", 0) >= 1:
-        score = max(score, 75.0)   # critical          → au moins HIGH (75)
+        score = max(score, 75.0)
 
-    # ── Anti-underestimation guards — correlated findings volume ─────────────
     correlated_findings = cr.get("total_findings", 0)
     medium_count = corr_by_sev.get("medium", 0)
-    if correlated_findings >= 15:
+    if correlated_findings >= 10 and medium_count >= 2:
         score = max(score, 45.0)
-    if correlated_findings >= 15 and medium_count >= 2:
-        score = max(score, 50.0)
-        logger.info(
-            "[P4] Score floor applied: corr_findings=%d medium=%d -> floor=50",
-            correlated_findings, medium_count,
-        )
 
     final = min(int(score), 100)
-
-    # FIX 2: IDOR bonus -- confirmed high finding, +10 capped at 100
-    if not idor_data.get("skipped") and idor_data.get("total", 0) >= 1:
-        final = min(final + 10, 100)
 
     return {
         "final_score": final,
         "component_scores": {
+            "sqlmap_sqli":      round(f_sqlmap,    2),
+            "idor_bac":         round(f_idor,      2),
             "nuclei_cve":       round(f_nuclei,    2),
             "zap_web":          round(f_zap,       2),
-            "abuseipdb":        round(f_abuse,     2),
-            "virustotal":       round(f_vt,        2),
             "exploitability":   round(f_exploit,   2),
-            "port_exposure":    round(f_port,      2),
-            "cve_severity":     round(f_cve_sev,   2),
-            "service_exposure": round(f_svc_exp,   2),
-            "endpoint_risk":    round(f_endpoints, 2),
-            "network_reach":    round(f_network,   2),
             "nikto":            round(f_nikto,     2),
             "wapiti":           round(f_wapiti,    2),
+            "endpoint_risk":    round(f_endpoints, 2),
+            "abuseipdb":        round(f_abuse,     2),
+            "virustotal":       round(f_vt,        2),
         },
         "confidence_score":           round(confidence,   2),
         "exploitability_score":       round(f_exploit,    2),

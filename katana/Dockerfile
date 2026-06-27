@@ -1,5 +1,5 @@
-FROM golang:1.25-bookworm AS katana-build
-RUN go install github.com/projectdiscovery/katana/cmd/katana@latest
+FROM golang:1.23-bookworm AS katana-build
+RUN go install github.com/projectdiscovery/katana/cmd/katana@v1.1.0
 
 
 FROM python:3.12-slim
@@ -16,7 +16,9 @@ RUN chmod +x /usr/local/bin/katana
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout=120 -r requirements.txt
+RUN pip config set global.timeout 300 \
+    && pip config set global.retries 5
+RUN pip install --no-cache-dir --timeout=300 --retries=5 -r requirements.txt
 COPY main.py .
 
 EXPOSE 9009

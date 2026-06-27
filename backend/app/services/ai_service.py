@@ -649,10 +649,9 @@ def _build_ai_fallback_from_summary(scan_summary: Dict[str, Any]) -> Dict[str, A
             "priority":             "immediate" if sev == "critical" else "72h" if sev == "high" else "1week",
         })
 
-    by_sev    = scan_summary.get("by_severity", {})
-    n_crit    = by_sev.get("critical", 0)
-    n_high    = by_sev.get("high", 0)
-    n_med     = by_sev.get("medium", 0)
+    n_crit    = sum(1 for f in all_findings if f.get("severity") == "critical")
+    n_high    = sum(1 for f in all_findings if f.get("severity") == "high")
+    n_med     = sum(1 for f in all_findings if f.get("severity") == "medium")
     n_confirm = len(confirmed)
 
     immediate = []
@@ -675,38 +674,119 @@ def _build_ai_fallback_from_summary(scan_summary: Dict[str, Any]) -> Dict[str, A
     if not short:
         short = ["Schedule remediation window for medium-severity findings."]
 
+    # Build a richer executive summary from confirmed findings detail
+    vuln_classes: List[str] = []
+    for f in confirmed[:8]:
+        title = f.get("title", "")
+        sev   = f.get("severity", "")
+        if title and sev in ("critical", "high"):
+            vuln_classes.append(f"{title} [{sev}]")
+
+    vuln_detail = "; ".join(vuln_classes[:4]) if vuln_classes else "multiple web vulnerabilities"
+
+    exec_lines: List[str] = [
+        f"Automated security assessment of the target identified {len(all_findings)} findings "
+        f"({n_crit} critical, {n_high} high, {n_med} medium) with a {risk_level} risk profile "
+        f"(score {risk_score}/100).",
+    ]
+    if vuln_classes:
+        exec_lines.append(
+            f"Key confirmed vulnerabilities include: {vuln_detail}."
+        )
+    if sqli:
+        exec_lines.append(
+            f"SQL injection was confirmed by SQLMap in {len(sqli)} parameter(s), "
+            f"enabling potential data exfiltration or authentication bypass."
+        )
+    if xss:
+        exec_lines.append(
+            f"Cross-site scripting vulnerabilities ({len(xss)} findings) were confirmed "
+            f"by Dalfox, allowing client-side code execution in victim browsers."
+        )
+    if secrets:
+        exec_lines.append(
+            f"{len(secrets)} secret(s) or credential(s) were detected by GitLeaks, "
+            f"potentially allowing unauthorized access to integrated systems."
+        )
+    if attack_paths:
+        exec_lines.append(
+            f"The assessment identified {len(attack_paths)} attack path(s) that could be "
+            f"chained for privilege escalation or full system compromise."
+        )
+    if risk_level in ("Critical", "High"):
+        exec_lines.append(
+            "Immediate remediation of critical and high severity findings is strongly recommended "
+            "before the system is exposed to untrusted users or networks."
+        )
+
+    # Compliance hints based on finding types
+    compliance: List[Dict[str, Any]] = []
+    cwe_set: set[str] = set()
+    for f in confirmed:
+        for cwe in f.get("cwe_ids", []):
+            cwe_set.add(str(cwe))
+    if "89" in cwe_set or any("sql" in (f.get("title","")).lower() for f in confirmed):
+        compliance.append({"standard": "OWASP Top 10", "category": "A03:2021 Injection",
+                           "finding_refs": ["SQLi"], "impact": "Data breach risk"})
+    if "79" in cwe_set or any("xss" in (f.get("title","")).lower() for f in confirmed):
+        compliance.append({"standard": "OWASP Top 10", "category": "A03:2021 XSS",
+                           "finding_refs": ["XSS"], "impact": "Session hijacking"})
+    if "22" in cwe_set or any("traversal" in (f.get("title","")).lower() for f in confirmed):
+        compliance.append({"standard": "OWASP Top 10", "category": "A01:2021 Broken Access Control",
+                           "finding_refs": ["Path Traversal"], "impact": "Unauthorized file access"})
+    if "347" in cwe_set or any("jwt" in (f.get("title","")).lower() for f in confirmed):
+        compliance.append({"standard": "OWASP Top 10", "category": "A02:2021 Cryptographic Failures",
+                           "finding_refs": ["JWT"], "impact": "Auth bypass"})
+
     return {
         "soc_summary": (
             f"Target presents a {risk_level} risk (score {risk_score}/100). "
             f"{n_confirm} confirmed findings: critical={n_crit}, high={n_high}, medium={n_med}. "
             f"{'Immediate containment required.' if risk_level in ('Critical','High') else 'Monitor and schedule remediation.'}"
         ),
-        "executive_summary": (
-            f"Automated assessment identified {len(all_findings)} total findings "
-            f"with a {risk_level} risk profile (score {risk_score}/100). "
-            f"{n_crit} critical and {n_high} high severity issues require priority remediation."
-        ),
+        "executive_summary": " ".join(exec_lines),
         "risk_level":          risk_level,
         "risk_score_analysis": (
             f"Score {risk_score}/100 computed from {n_confirm} confirmed findings "
-            f"({n_crit} critical, {n_high} high, {n_med} medium). AI narrative unavailable."
+            f"({n_crit} critical, {n_high} high, {n_med} medium). "
+            f"Exploitability weight drives score given {'active SQLi/XSS/auth-bypass confirmation' if sqli or xss else 'multiple confirmed web findings'}."
         ),
-        "attack_narrative":    attack_paths[0] if attack_paths else "No active attack chain identified.",
+        "attack_narrative":    (
+            attack_paths[0] if attack_paths
+            else (
+                f"Confirmed {n_crit} critical and {n_high} high severity vectors. "
+                f"Attack chain likely involves reconnaissance → exploitation of "
+                f"{'injection' if sqli else 'XSS' if xss else 'exposed endpoints'} → privilege escalation."
+            )
+        ),
         "attack_phases":       [],
         "top_vulnerabilities": top_vulns,
+        "immediate_actions":   immediate[:4],
+        "recommendations":     short[:4] + ["Enable continuous security monitoring and log all access attempts."],
         "remediation_roadmap": [
             {"phase": "Immediate (0-24h)",       "actions": immediate[:3]},
             {"phase": "Short-term (72h-1 week)", "actions": short[:3]},
-            {"phase": "Medium-term (1 month)",   "actions": ["Enable continuous security monitoring."]},
+            {"phase": "Medium-term (1 month)",   "actions": [
+                "Implement a Web Application Firewall (WAF) with OWASP Core Rule Set.",
+                "Enable continuous security monitoring.",
+                "Schedule a full manual penetration test for business-critical functions.",
+            ]},
         ],
-        "compliance_violations":     [],
-        "headers_analysis":          "Manual review of security headers recommended.",
-        "false_positive_assessment": f"Rule-based: {n_confirm} confirmed findings from pipeline.",
-        "detection_confidence":      "medium",
+        "compliance_violations":     compliance,
+        "compliance_notes":          (
+            f"Findings map to OWASP Top 10 categories. "
+            f"{'SQL injection (A03) and ' if sqli else ''}"
+            f"{'XSS (A03) and ' if xss else ''}"
+            f"{'secrets exposure (A02) ' if secrets else ''}"
+            f"require priority remediation for PCI-DSS, ISO 27001, and GDPR compliance."
+        ),
+        "headers_analysis":          "Manual review of HTTP security headers (CSP, HSTS, X-Frame-Options) recommended.",
+        "false_positive_assessment": f"Rule-based: {n_confirm} confirmed findings from multi-tool pipeline (Nuclei + ZAP + Dalfox + custom probes).",
+        "detection_confidence":      "high" if n_confirm > 5 else "medium",
         "model_used":                "rule-based-fallback",
         "provider":                  "fallback",
         "fallback":                  True,
-        "fallback_reason":           "AI JSON parse error — structured fallback from pipeline data",
+        "fallback_reason":           "AI unavailable — structured fallback from pipeline data",
     }
 
 
@@ -725,8 +805,15 @@ async def analyze_with_ai(
         return {"error": "No API key configured", "enabled": False}
 
     prompt = _build_prompt(target, scan_summary)
+    _all_f = scan_summary.get("correlated_findings", [])
     logger.info(
-        "AI analysis — provider=%s model=%s prompt_chars=%d",
+        "[P5] Gemini prompt stats: critical=%d high=%d medium=%d",
+        sum(1 for f in _all_f if f.get("severity") == "critical"),
+        sum(1 for f in _all_f if f.get("severity") == "high"),
+        sum(1 for f in _all_f if f.get("severity") == "medium"),
+    )
+    logger.info(
+        "AI analysis -- provider=%s model=%s prompt_chars=%d",
         provider, model, len(prompt),
     )
 
@@ -738,7 +825,12 @@ async def analyze_with_ai(
 
     except json.JSONDecodeError as exc:
         logger.warning("AI JSON parse error — fallback structuré activé: %s", exc)
-        return _build_ai_fallback_from_summary(scan_summary)
+        result = _build_ai_fallback_from_summary(scan_summary)
+        result["fallback_reason"] = f"AI JSON parse error: {exc}"
+        return result
     except Exception as exc:
-        logger.error("AI analysis failed (%s): %s", provider, exc)
-        return {"error": str(exc), "enabled": True, "provider": provider}
+        logger.error("AI analysis failed (%s): %s — fallback structuré activé", provider, exc)
+        result = _build_ai_fallback_from_summary(scan_summary)
+        result["fallback_reason"] = f"AI unavailable ({provider}): {exc}"
+        result["enabled"] = True
+        return result

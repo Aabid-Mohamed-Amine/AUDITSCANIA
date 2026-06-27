@@ -40,3 +40,4 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+nuclei/templates/

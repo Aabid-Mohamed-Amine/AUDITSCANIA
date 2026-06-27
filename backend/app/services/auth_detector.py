@@ -373,6 +373,42 @@ async def _probe_login_paths(
 
 # ── Form login ────────────────────────────────────────────────────────────────
 
+async def _perform_json_login(
+    login_url: str,
+    username:  str,
+    password:  str,
+    timeout:   float = 20.0,
+) -> Optional["AuthContext"]:
+    """JSON REST login (Juice Shop /rest/user/login → JWT in response body)."""
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout, verify=False, follow_redirects=True,
+            headers={"User-Agent": _UA, "Content-Type": "application/json"},
+        ) as client:
+            resp = await client.post(login_url, json={"email": username, "password": password})
+            if resp.status_code not in (200, 201):
+                logger.debug("JSON login %s → HTTP %d", login_url, resp.status_code)
+                return None
+            data = resp.json()
+            # Juice Shop: {"authentication": {"token": "...", "bid": N}}
+            auth_obj = data.get("authentication") or {}
+            token = auth_obj.get("token") or data.get("token")
+            if not token:
+                return None
+            logger.info("JSON login OK — JWT obtained from %s", login_url)
+            return AuthContext(
+                auth_type = AuthType.JWT_BEARER,
+                headers   = {"Authorization": f"Bearer {token}"},
+                cookies   = {},
+                detected  = True,
+                login_url = login_url,
+                notes     = f"JSON REST login OK at {login_url}",
+            )
+    except Exception as exc:
+        logger.debug("JSON login failed at %s: %s", login_url, exc)
+        return None
+
+
 async def _perform_form_login(
     login_url:   str,
     username:    str,
@@ -817,6 +853,15 @@ async def detect_and_authenticate(
         form_fields = auth_info.get("form_fields", {})
 
         if login_url:
+            # Try JSON login first for REST endpoints (Juice Shop, JSON APIs)
+            _is_rest = "/rest/" in login_url or auth_info.get("is_juice_shop", False)
+            if _is_rest:
+                json_ctx = await _perform_json_login(
+                    login_url, credentials.username, credentials.password, timeout=timeout,
+                )
+                if json_ctx and json_ctx.has_auth():
+                    return json_ctx
+
             form_fields.setdefault("username", "username")
             form_fields.setdefault("password", "password")
             logger.info("Auth: form login at %s", login_url)

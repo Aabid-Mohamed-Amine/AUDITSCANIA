@@ -195,7 +195,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         "-Format", "json",
         "-output", _output_path,
         "-maxtime", str(timeout),
-        "-C", "all",
+        "-Tuning", "123bde",
         "-nointeractive",
         "-ask", "no",
         *ssl_flag,

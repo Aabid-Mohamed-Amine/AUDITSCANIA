@@ -23,7 +23,7 @@ ZAP_API_KEY     = os.getenv("ZAP_API_KEY", "")
 SPIDER_TIMEOUT_S       = int(os.getenv("ZAP_SPIDER_TIMEOUT",      "180"))   # 3 min
 AJAX_SPIDER_TIMEOUT_S  = int(os.getenv("ZAP_AJAX_TIMEOUT",        "60"))    # 1 min max
 PASSIVE_WAIT_S         = int(os.getenv("ZAP_PASSIVE_WAIT",        "30"))    # 30 s
-ACTIVE_SCAN_TIMEOUT_S  = int(os.getenv("ZAP_ACTIVE_TIMEOUT",      "480"))   # 8 min
+ACTIVE_SCAN_TIMEOUT_S  = int(os.getenv("ZAP_ACTIVE_TIMEOUT",      "300"))   # 5 min
 
 RISK_LABELS = {4: "Critical", 3: "High", 2: "Medium", 1: "Low", 0: "Informational"}
 
@@ -427,6 +427,33 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         if req.active_scan:
             logger.info("ZAP Phase 4/4 — Active Scan")
             try:
+                # Enable all scanners then activate critical plugin IDs
+                try:
+                    zap.ascan.enable_all_scanners()
+                    logger.info("ZAP: enableAllScanners called")
+                except Exception as _e:
+                    logger.warning("ZAP enableAllScanners failed: %s", _e)
+
+                _SCANNER_IDS = [
+                    "40012",  # Cross Site Scripting (Reflected)
+                    "40014",  # Cross Site Scripting (Persistent)
+                    "40016",  # Cross Site Scripting (Persistent) - Prime
+                    "40017",  # Cross Site Scripting (Persistent) - Spider
+                    "40018",  # SQL Injection
+                    "90019",  # Server Side Code Injection
+                    "90020",  # Remote OS Command Injection
+                    "40003",  # CRLF Injection
+                    "40008",  # Parameter Tampering
+                    "40009",  # Server Side Include
+                ]
+                for _sid in _SCANNER_IDS:
+                    try:
+                        zap.ascan.set_scanner_attack_strength(id=_sid, attackstrength="HIGH")
+                        zap.ascan.set_scanner_alert_threshold(id=_sid, alertthreshold="LOW")
+                    except Exception as _e:
+                        logger.debug("ZAP scanner %s config warning: %s", _sid, _e)
+                logger.info("ZAP: %d critical scanners configured", len(_SCANNER_IDS))
+
                 ascan_kwargs: Dict[str, Any] = {
                     "url":      target_url,
                     "recurse":  True,
