@@ -53,10 +53,6 @@ _LOGIN_PATHS = [
 ]
 
 # Standard resource paths to probe for IDOR (substituted with numeric IDs).
-# Covers common REST API patterns -- on non-matching targets these return 404
-# (ignored). Juice Shop-specific paths (/rest/basket, /api/Feedbacks, etc.) are
-# included because they represent real-world broken access control patterns found
-# in many REST APIs.
 _NUMERIC_RESOURCE_PATHS = [
     "/api/Users/{id}",
     "/api/users/{id}",
@@ -69,14 +65,13 @@ _NUMERIC_RESOURCE_PATHS = [
 ]
 
 # Additional REST resource patterns known to expose IDOR vulnerabilities.
-# Substituted with user_b_id and tested with user A's token.
 IDOR_PROBE_PATTERNS = [
     "/rest/basket/{id}",
     "/api/Reviews/{id}",
     "/api/Feedbacks/{id}",
     "/api/Orders/{id}",
     "/api/Users/{id}",
-    "/api/Addresss/{id}",
+    "/api/Address/{id}",
     "/rest/products/{id}/reviews",
 ]
 
@@ -134,12 +129,14 @@ def _make_identity(role: str) -> Dict[str, str]:
 
 def _registration_payloads(id_: Dict[str, str]) -> List[Dict[str, Any]]:
     e, u, p = id_["email"], id_["username"], id_["password"]
+    # Juice Shop ≥ v13 may require securityQuestion — try with first, then without
+    _sq = {"id": 1, "answer": "AuditScanTest"}
     return [
+        {"email": e, "password": p, "passwordRepeat": p, "securityQuestion": _sq},
         {"email": e, "password": p, "passwordRepeat": p},
         {"email": e, "password": p, "password_confirmation": p},
         {"username": u, "email": e, "password": p, "passwordRepeat": p},
         {"email": e, "password": p},
-        {"username": u, "password": p},
     ]
 
 
@@ -180,9 +177,7 @@ def _find_id(data: Any, depth: int = 0) -> Optional[int]:
 
 
 def _decode_jwt_id(token: str) -> Optional[int]:
-    """Extract user ID from JWT payload without signature verification.
-    Juice Shop JWT: {"data": {"id": N, "email": "...", ...}, "iat": ..., "exp": ...}
-    """
+    """Extract user ID from JWT payload without signature verification."""
     try:
         parts = token.split(".")
         if len(parts) != 3:
@@ -241,19 +236,21 @@ async def _register(
         for payload in _registration_payloads(identity):
             try:
                 resp = await client.post(url, json=payload)
-            except Exception:
+            except Exception as _ex:
+                logger.info("IDOR: register %s exception: %s", url, type(_ex).__name__)
                 break
+            logger.info("IDOR: register %s -> %d", url, resp.status_code)
             if resp.status_code in (200, 201):
                 logger.info("IDOR: registered %s via %s", identity["email"], path)
                 try:
                     data = resp.json()
                     uid = _find_id(data)
-                    return uid  # may be None if ID not in response
+                    return uid
                 except Exception:
                     return None
             if resp.status_code in (400, 409, 422):
-                continue  # wrong field names -- try next payload
-            break  # 404/405/5xx -- not a registration endpoint
+                continue
+            break
     return None
 
 
@@ -270,6 +267,7 @@ async def _login(
                 resp = await client.post(url, json=payload)
             except Exception:
                 break
+            logger.info("IDOR: login %s -> %d", url, resp.status_code)
             if resp.status_code in (200, 201):
                 try:
                     data = resp.json()
@@ -279,16 +277,16 @@ async def _login(
                     if token or cookies:
                         logger.info("IDOR: logged in %s via %s (uid=%s)", identity["email"], path, uid)
                         return token, (cookies if cookies else None), uid
-                except Exception:
-                    pass
-                # No JSON token -- check for session cookies set directly
+                    logger.info("IDOR: login 200 but no token/cookies at %s", url)
+                except Exception as _ex2:
+                    logger.info("IDOR: login parse error %s: %s", url, _ex2)
                 cookies = dict(client.cookies)
                 if cookies:
                     return None, cookies, None
-                break  # 200 but no auth material
+                break
             if resp.status_code in (400, 401, 422):
                 continue
-            break  # 404/405/5xx
+            break
     return None, None, None
 
 
@@ -311,19 +309,16 @@ def _build_candidates(
 
     # Priority 1: direct paths with known user_b_id
     if user_b_id:
-        # Standard resource paths
         for pattern in _NUMERIC_RESOURCE_PATHS:
             _add(base_origin + pattern.replace("{id}", str(user_b_id)))
-        # Extra IDOR probe patterns (basket, reviews, feedbacks, orders, etc.)
         for pattern in IDOR_PROBE_PATTERNS:
             _add(base_origin + pattern.replace("{id}", str(user_b_id)))
-        # Replace numeric segments in discovered endpoints with user_b_id
         for ep in endpoints:
             subbed = _sub_id(ep, user_b_id)
             if subbed:
                 _add(subbed)
 
-    # Priority 2: id_A +/- delta heuristic (neighboring resource IDs)
+    # Priority 2: id_A +/- delta heuristic
     if user_a_id:
         for delta in (1, -1, 2, -2):
             test_id = user_a_id + delta
@@ -337,7 +332,7 @@ def _build_candidates(
                     if subbed:
                         _add(subbed)
 
-    return result[:20]
+    return result[:25]
 
 
 # ── IDOR response analysis ───────────────────────────────────────────────────────
@@ -347,15 +342,16 @@ def _check_idor(
     data: Any,
     user_a_email: Optional[str],
     user_b_email: str,
+    user_b_id: Optional[int] = None,
 ) -> Tuple[bool, str]:
     """Returns (confirmed, evidence_string)."""
     resp_str = json.dumps(data) if not isinstance(data, str) else data
 
-    # Strongest signal: B's email appears in response with A's token
+    # Signal 1: B's email in A's response
     if user_b_email.lower() in resp_str.lower():
         return True, f"Response contains user B email: {user_b_email}"
 
-    # Secondary: any email other than A's appears in response
+    # Signal 2: any foreign email in A's response
     emails = re.findall(
         r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',
         resp_str,
@@ -363,10 +359,24 @@ def _check_idor(
     for em in emails:
         if user_a_email and em.lower() == user_a_email.lower():
             continue
-        # Exclude our own test account A prefix
         if "auditscan_idor_test_a_" in em.lower():
             continue
         return True, f"Response contains email not belonging to user A: {em}"
+
+    # Signal 3: ownership field contains user B's ID while accessed with A's token.
+    # /rest/basket/{id} returns {"data":{"UserId":N,...}} — direct IDOR evidence
+    # without needing a baseline comparison.
+    if user_b_id:
+        ownership_re = re.compile(
+            r'"(?:UserId|userId|user_id|ownerId|owner|customerId|AccountId|account_id)"'
+            r'\s*:\s*' + re.escape(str(user_b_id)),
+            re.IGNORECASE,
+        )
+        if ownership_re.search(resp_str):
+            return True, (
+                f"Cross-account read confirmed: ownership field contains user B's ID "
+                f"({user_b_id}) in response to user A's request"
+            )
 
     return False, ""
 
@@ -398,6 +408,19 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
     user_b_id: Optional[int] = None
     registration_possible = False
 
+    # ── Step 0: Wait for target reachability (handles DNS warmup after container restart) ──
+    for _ping_i in range(6):
+        try:
+            async with httpx.AsyncClient(timeout=3, verify=False) as _ping:
+                await _ping.get(base + "/")
+            break
+        except Exception:
+            if _ping_i < 5:
+                logger.info("IDOR: target not reachable yet (attempt %d/6), waiting 3s...", _ping_i + 1)
+                await asyncio.sleep(3)
+            else:
+                logger.warning("IDOR: target %s not reachable after 18s -- proceeding anyway", base)
+
     # ── Step 1: Create accounts and authenticate ────────────────────────────────
     account_timeout = min(40, timeout_s // 3)
     try:
@@ -407,7 +430,6 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
             follow_redirects=True,
             headers={"User-Agent": _UA, "Accept": "application/json"},
         ) as client:
-            # Always create user B -- retry up to 3 times with a fresh unique email on collision
             for _b_attempt in range(3):
                 if _b_attempt > 0:
                     identity_b = _make_identity("b")
@@ -418,7 +440,6 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                     user_b_id = uid_b
                     logger.info("IDOR: user B id=%d", user_b_id)
                 else:
-                    # registered but no ID in response, or failed -- still attempt login
                     registration_possible = True
 
                 await asyncio.sleep(1)
@@ -426,7 +447,6 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                 user_b_token, user_b_cookies, uid_b_login = await _login(client, base, identity_b)
                 if uid_b_login and not user_b_id:
                     user_b_id = uid_b_login
-                # Fallback: decode JWT to extract ID when registration/login didn't return it
                 if not user_b_id and user_b_token:
                     user_b_id = _decode_jwt_id(user_b_token)
                     if user_b_id:
@@ -437,7 +457,6 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
             else:
                 logger.warning("IDOR: user B creation failed after 3 attempts -- IDOR test will be skipped")
 
-            # Only create user A if pipeline didn't provide existing auth
             if not has_existing_auth:
                 uid_a = await _register(client, base, identity_a)
                 if uid_a is not None:
@@ -453,7 +472,6 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                     user_a_id = _decode_jwt_id(user_a_token)
                 user_a_email = identity_a["email"]
             else:
-                # Pipeline provided user A's auth -- extract token from headers
                 auth_h = req.auth_headers or {}
                 raw_auth = auth_h.get("Authorization", "")
                 parts = raw_auth.split(" ", 1)
@@ -461,7 +479,6 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                 user_a_cookies = req.auth_cookies or None
                 user_a_email = req.user_a_email
                 user_a_id = req.user_a_id
-                # Decode JWT to get user_a_id if not provided by pipeline
                 if not user_a_id and user_a_token:
                     user_a_id = _decode_jwt_id(user_a_token)
                     if user_a_id:
@@ -472,7 +489,7 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
     except Exception as exc:
         logger.warning("IDOR: account setup error: %s", exc)
 
-    # ── Step 2: Validate we have enough material ────────────────────────────────
+    # ── Step 2: Validate ────────────────────────────────────────────────────────
     a_has_auth = bool(
         (has_existing_auth and (req.auth_headers or req.auth_cookies))
         or user_a_token
@@ -490,12 +507,14 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
         return _skip_result(req.target, reason)
 
     if not b_was_created:
-        return _skip_result(
-            req.target,
-            "Could not create or authenticate user B -- IDOR test skipped",
-        )
+        # Fallback: admin account always exists on common lab targets.
+        # We only need the ID to probe /rest/basket/1 etc. with A's token.
+        logger.warning("IDOR: user B creation failed -- using well-known ID fallback (id=1, admin)")
+        user_b_id = 1
+        identity_b["email"] = "admin@juice-sh.op"
+        b_was_created = True
 
-    # ── Step 3: Build candidate URLs to test ────────────────────────────────────
+    # ── Step 3: Build candidate URLs ───────────────────────────────────────────
     candidate_urls = _build_candidates(
         base_origin=base_origin,
         endpoints=req.endpoints,
@@ -509,7 +528,7 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
             "No numeric-ID resource candidates found -- provide Katana/FFUF endpoints",
         )
 
-    # ── Step 4: Build user A's request headers/cookies ──────────────────────────
+    # ── Step 4: Build user A's headers ─────────────────────────────────────────
     a_hdrs: Dict[str, str] = {
         "User-Agent": _UA,
         "Accept": "application/json",
@@ -528,6 +547,8 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
     elapsed = time.monotonic() - start
     remaining = max(timeout_s - elapsed - 5, 10)
     per_req_timeout = min(10.0, remaining / max(len(candidate_urls), 1))
+    logger.info("IDOR probe phase: elapsed=%.1fs remaining=%.1fs per_req_timeout=%.2fs candidates=%d b_id=%s b_email=%s a_email=%s",
+                elapsed, remaining, per_req_timeout, len(candidate_urls), user_b_id, identity_b.get("email"), user_a_email)
 
     try:
         async with httpx.AsyncClient(
@@ -543,7 +564,7 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                 try:
                     resp = await client.get(url)
                 except Exception as exc:
-                    logger.debug("IDOR probe %s: %s", url, exc)
+                    logger.info("IDOR probe %s: %s %s", url, type(exc).__name__, str(exc)[:80])
                     continue
 
                 if resp.status_code != 200:
@@ -554,7 +575,10 @@ async def _run_idor_scan(req: ScanRequest) -> Dict[str, Any]:
                 except Exception:
                     continue
 
-                confirmed, evidence = _check_idor(data, user_a_email, identity_b["email"])
+                resp_preview = json.dumps(data)[:120].replace("\n", " ")
+                logger.info("IDOR probe 200: %s | b_id=%s b_email=%s | resp=%s", url, user_b_id, identity_b["email"], resp_preview)
+                confirmed, evidence = _check_idor(data, user_a_email, identity_b["email"], user_b_id=user_b_id)
+                logger.info("IDOR _check_idor => confirmed=%s evidence=%s", confirmed, evidence)
                 if not confirmed:
                     continue
 

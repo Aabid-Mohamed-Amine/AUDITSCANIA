@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +194,7 @@ def correlate(
     wapiti_data:  Optional[Dict[str, Any]] = None,
     sqlmap_data:  Optional[Dict[str, Any]] = None,
     idor_data:    Optional[Dict[str, Any]] = None,
+    gitleaks_data: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Fusionne et corrèle les résultats du pipeline de scan.
@@ -213,8 +214,9 @@ def correlate(
     lab_challenges_data = lab_challenges_data or {}
     nikto_data  = nikto_data  or {}
     wapiti_data = wapiti_data or {}
-    sqlmap_data = sqlmap_data or {}
-    idor_data   = idor_data   or {}
+    sqlmap_data   = sqlmap_data   or {}
+    idor_data     = idor_data     or {}
+    gitleaks_data = gitleaks_data or {}
 
     service_map = _build_nmap_service_map(nmap_data)
     findings: List[Dict[str, Any]] = []
@@ -631,6 +633,55 @@ def correlate(
             "matched_at":           idf.get("target_url", ""),
         })
 
+    # ── GitLeaks : Secrets / Credentials exposés ─────────────────────────────────
+    _GL_CWE: Dict[str, List[str]] = {
+        "exposed-cryptographic-key": ["CWE-321", "CWE-798"],
+        "exposed-sensitive-file":    ["CWE-538", "CWE-200"],
+        "generic-api-key":           ["CWE-798"],
+        "jwt":                       ["CWE-321"],
+        "private-key":               ["CWE-321"],
+        "aws-access-token":          ["CWE-798"],
+    }
+    _GL_CVSS: Dict[str, float] = {
+        "critical": 9.1,
+        "high":     7.5,
+        "medium":   5.3,
+        "low":      3.1,
+    }
+    for idx, gf in enumerate(gitleaks_data.get("findings", [])):
+        sev     = gf.get("severity", "high")
+        rule_id = gf.get("rule_id", "secret-exposure")
+        url_gl  = gf.get("url") or gf.get("file", "")
+        port    = _extract_port_from_url(url_gl)
+        cvss    = _GL_CVSS.get(sev, 7.5)
+        cwe_ids = _GL_CWE.get(rule_id, ["CWE-200"])
+        exploit = 90.0 if sev == "critical" else 75.0
+
+        attack_path = f"Secret exposed: {url_gl} — {gf.get('description', rule_id)}"
+        attack_paths.append(attack_path)
+
+        findings.append({
+            "id":                   f"gitleaks-{idx}",
+            "type":                 "secret_exposure",
+            "title":                f"Secret Exposed: {gf.get('description', rule_id)}",
+            "severity":             sev,
+            "description":          gf.get("description", ""),
+            "url":                  url_gl,
+            "sources":              ["gitleaks"],
+            "affected_service":     "web",
+            "affected_port":        port,
+            "cve_ids":              [],
+            "cwe_ids":              cwe_ids,
+            "cvss_score":           cvss,
+            "epss_score":           None,
+            "tags":                 ["secret", "credential", "exposure", rule_id],
+            "exploitability_score": exploit,
+            "confidence_score":     0.95,
+            "evidence":             gf.get("match", ""),
+            "attack_path":          attack_path,
+            "matched_at":           url_gl,
+        })
+
     # ── Phase F : Lab challenges — contexte informatif uniquement ───────────────
     # Lab challenges (OWASP Juice Shop /api/Challenges) sont des MÉTADONNÉES
     # de l'application, pas des vulnérabilités confirmées par test actif.
@@ -686,6 +737,47 @@ def correlate(
                     ][:3],
                 })
 
+        # ── GitLeaks → challenge cross-reference ─────────────────────────────
+        # Exposed secret files on known paths prove specific challenges are
+        # exploitable even without solving them in-game.
+        _GL_URL_TO_KEYWORDS: List[Tuple[str, List[str]]] = [
+            ("encryptionkeys/premium",  ["premium", "membership"]),
+            ("encryptionkeys/jwt",      ["jwt", "forged", "coupon", "nft", "takeover"]),
+            ("encryptionkeys",          ["easter", "egg", "nested", "encryption", "key"]),
+            ("ftp/",                    ["forgotten", "backup", "ftp", "confidential", "document"]),
+            ("accesslog",               ["access log", "observability"]),
+            ("swagger",                 ["api", "swagger", "expose"]),
+            ("package.json",            ["vulnerable", "component", "package"]),
+        ]
+        _already_matched = {c.get("name", "").lower() for c in matched_lab_challenges}
+        _gl_findings = (gitleaks_data or {}).get("findings", [])
+        _gl_urls = [
+            (gf.get("url") or gf.get("file") or "").lower()
+            for gf in _gl_findings
+        ]
+        for challenge in all_challenges:
+            ch_name     = (challenge.get("name") or "").lower()
+            ch_category = (challenge.get("category") or "").lower()
+            if ch_name in _already_matched:
+                continue
+            for gl_url in _gl_urls:
+                if not gl_url:
+                    continue
+                for url_pat, kws in _GL_URL_TO_KEYWORDS:
+                    if url_pat not in gl_url:
+                        continue
+                    if any(kw in ch_name or kw in ch_category for kw in kws):
+                        matched_lab_challenges.append({
+                            **challenge,
+                            "confirmed_by": [["gitleaks"]],
+                            "gitleaks_evidence": gl_url,
+                        })
+                        _already_matched.add(ch_name)
+                        break
+                else:
+                    continue
+                break
+
         lab_context = {
             "platform":  platform,
             "total":     len(all_challenges),
@@ -693,7 +785,7 @@ def correlate(
             "note":      "Known challenge list — informational only, not confirmed by active scanning",
         }
         logger.info(
-            "[Correlator] Lab challenges: %d total, %d matched by active scanners",
+            "[Correlator] Lab challenges: %d total, %d matched by active scanners + gitleaks",
             len(all_challenges), len(matched_lab_challenges),
         )
     elif lab_challenges_data.get("skipped"):

@@ -143,9 +143,10 @@ def _parse_report(report_path: str, target: str) -> List[Dict[str, Any]]:
 
 
 class ScanRequest(BaseModel):
-    target:  str
-    timeout: int = 120
-    headers: Optional[Dict[str, str]] = None
+    target:      str
+    timeout:     int = 120
+    headers:     Optional[Dict[str, str]] = None
+    extra_urls:  Optional[List[str]] = None  # pre-discovered endpoints from FFUF/Katana
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -162,17 +163,50 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     timeout = max(30, min(req.timeout, 300))
 
     report_path  = f"/tmp/wapiti_{uuid.uuid4().hex}.json"
+    input_file   = f"/tmp/wapiti_urls_{uuid.uuid4().hex}.txt"
 
     resolved_url, original_hostname, ip, port = _resolve_target(target)
 
-    # Detect internal hostname — "domain" scope fails on bare hostnames like "juiceshop"
-    _parsed_host = urlparse(resolved_url)
-    _hostname = _parsed_host.hostname or ""
+    # Use original_hostname (pre-DNS) for internal detection — resolved_url contains the IP
+    # which always has dots and would be incorrectly flagged as external.
+    # Also treat private IP ranges as internal.
+    import ipaddress as _ipaddress
+    def _is_private(addr: str) -> bool:
+        try:
+            return _ipaddress.ip_address(addr).is_private
+        except ValueError:
+            return False
+
     is_internal = (
-        "." not in _hostname or
-        _hostname.endswith((".local", ".internal", ".lan"))
+        "." not in original_hostname or
+        original_hostname.endswith((".local", ".internal", ".lan")) or
+        _is_private(ip)
     )
-    scope = "url" if is_internal else "domain"
+    # "domain" scope on Docker/internal targets = 0 findings (no external DNS to crawl).
+    # Use "folder" so Wapiti crawls the full app under the base path.
+    scope = "folder" if is_internal else "domain"
+
+    # Write pre-discovered endpoints to input file so Wapiti tests them directly.
+    # Critical for Angular SPAs where Wapiti's HTML crawler finds nothing (no SSR).
+    _extra = req.extra_urls or []
+    _base_stripped = target.rstrip("/")
+    _known_api = [
+        f"{_base_stripped}/rest/products/search?q=test",
+        f"{_base_stripped}/rest/user/login",
+        f"{_base_stripped}/rest/user/whoami",
+        f"{_base_stripped}/api/Users",
+        f"{_base_stripped}/api/Products",
+        f"{_base_stripped}/api/Feedbacks",
+        f"{_base_stripped}/api/BasketItems",
+        f"{_base_stripped}/api/Challenges",
+        f"{_base_stripped}/rest/basket/1",
+        f"{_base_stripped}/ftp/",
+        f"{_base_stripped}/encryptionkeys/",
+        f"{_base_stripped}/b2b/v2/orders",
+    ]
+    _all_urls = list(dict.fromkeys([resolved_url] + _known_api + _extra))
+    with open(input_file, "w") as _fh:
+        _fh.write("\n".join(_all_urls))
 
     cmd: List[str] = [
         "wapiti",
@@ -185,6 +219,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     cmd += [
         "--scope", scope,
         "-d",    "3",
+        "--input-file", input_file,
         "-m",    "sql,xss,ssrf,xxe,htaccess,backup,redirect,shellshock,wapp,csrf,brute_login_form,http_headers",
         "--max-links-per-page", "50",
         "--max-files-per-dir",  "20",
@@ -219,6 +254,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             findings    = _parse_report(report_path, target) if os.path.exists(report_path) else []
             by_severity = _count_by_sev(findings)
             _cleanup(report_path)
+            _cleanup(input_file)
             return {
                 "target":      target,
                 "scope":       scope,
@@ -250,6 +286,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         findings    = _parse_report(report_path, target)
         by_severity = _count_by_sev(findings)
         _cleanup(report_path)
+        _cleanup(input_file)
 
         logger.info(
             "[Wapiti] scan complete: %s scope=%s -- %d finding(s) %s",
@@ -266,6 +303,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
 
     except FileNotFoundError:
         logger.error("[Wapiti] binary not found in PATH")
+        _cleanup(input_file)
         return {
             "target": target, "scope": scope,
             "error":  "wapiti binary not found -- is wapiti installed?",
@@ -274,6 +312,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
     except Exception as exc:
         logger.exception("[Wapiti] unexpected error for %s", target)
         _cleanup(report_path)
+        _cleanup(input_file)
         return {
             "target": target, "scope": scope, "error": str(exc),
             "findings": [], "total": 0, "by_severity": {},

@@ -44,7 +44,7 @@ _BASE_FLAGS = [
     "--timeout=15",        # per-request timeout
     "--retries=1",
     "--threads=1",
-    "--delay=2",
+    "--delay=0",           # no delay — avoids timeout on 50+ payload boolean-based blind
 ]
 
 # Extensions to skip (static assets)
@@ -579,11 +579,11 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             "technique": "BEUST",
         }]
 
-    # Budget: limit to top 5 targets so each gets ~50s instead of ~30s.
-    # Boolean-based blind needs 50+ requests; 30s was too tight on busy hosts.
-    max_targets    = min(len(all_targets), 5)
+    # With delay=0, each target needs ~30-60s for boolean-based blind.
+    # Test up to 6 targets; give each at least 80s so all techniques complete.
+    max_targets    = min(len(all_targets), 6)
     targets_to_run = all_targets[:max_targets]
-    per_target_timeout = max(60, req.timeout // max(len(targets_to_run), 1) - 10)
+    per_target_timeout = max(80, req.timeout // max(len(targets_to_run), 1))
 
     logger.info(
         "Testing %d/%d targets, %ds each",

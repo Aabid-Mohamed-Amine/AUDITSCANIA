@@ -48,8 +48,6 @@ async def _run_dalfox(url: str, timeout: int, deep_mode: bool, auth_headers: Opt
         "--timeout", "5",
         "--scan-timeout", str(min(timeout, 20)),
         "--no-color",
-        "--skip-mining-dom",
-        "--skip-mining-dict",
         "--no-freq",
     ]
     # dalfox v3 no longer auto-discovers query-string params from the URL --

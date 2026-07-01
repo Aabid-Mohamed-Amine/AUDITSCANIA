@@ -49,11 +49,12 @@ _AUTH_KW = {
 
 
 class ScanRequest(BaseModel):
-    target:   str
-    timeout:  int  = 90
-    depth:    int  = 3
-    js_crawl: bool = True   # -jc: extract endpoints from JS bundles
-    headless: bool = False  # -hl: headless Chromium (SPA heavy rendering)
+    target:       str
+    timeout:      int  = 90
+    depth:        int  = 3
+    js_crawl:     bool = True   # -jc: extract endpoints from JS bundles
+    headless:     bool = False  # -hl: headless Chromium (SPA heavy rendering)
+    auth_headers: Optional[Dict[str, str]] = None
 
 
 def _normalize(target: str) -> str:
@@ -115,7 +116,11 @@ async def _check_reachable(target: str, timeout: float = 10.0) -> tuple[bool, st
 # ── Fallback crawler (pure Python) ───────────────────────────────────────────
 
 
-async def _fallback_crawl(target: str, timeout: int = 30) -> List[Dict[str, Any]]:
+async def _fallback_crawl(
+    target: str,
+    timeout: int = 30,
+    auth_headers: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
     """
     Simple regex-based link extractor used when Katana produces no output.
     Crawls up to 3 levels deep, max 200 URLs.
@@ -125,11 +130,15 @@ async def _fallback_crawl(target: str, timeout: int = 30) -> List[Dict[str, Any]
     visited:  set = set()
     base_netloc = urlparse(target).netloc
 
+    _headers = {"User-Agent": "Mozilla/5.0 (compatible; AuditScan/2.0)"}
+    if auth_headers:
+        _headers.update(auth_headers)
+
     async with httpx.AsyncClient(
         timeout=timeout / 10,
         follow_redirects=True,
         verify=False,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; AuditScan/2.0)"},
+        headers=_headers,
     ) as client:
         for url in to_visit[:50]:
             if url in visited or len(found) >= 200:
@@ -175,6 +184,7 @@ async def _fallback_crawl(target: str, timeout: int = 30) -> List[Dict[str, Any]
 
 async def _run_katana(
     target: str, depth: int, js_crawl: bool, headless: bool, timeout: int,
+    auth_headers: Optional[Dict[str, str]] = None,
 ) -> tuple[List[str], str]:
     """
     Run Katana and capture stdout line by line.
@@ -196,6 +206,9 @@ async def _run_katana(
         "-ef",        _EXCLUDE_EXTENSIONS,
         "-H",         "User-Agent: Mozilla/5.0 (compatible; AuditScan/2.0)",
     ]
+    if auth_headers:
+        for hname, hval in auth_headers.items():
+            cmd += ["-H", f"{hname}: {hval}"]
     if js_crawl:
         cmd += ["-jc"]
     if headless:
@@ -320,6 +333,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
             lines, last_stderr = await _run_katana(
                 target_url, req.depth, req.js_crawl, req.headless,
                 timeout=req.timeout,
+                auth_headers=req.auth_headers,
             )
             logger.info(
                 "Katana attempt %d: %d raw lines, stderr_len=%d",
@@ -347,7 +361,7 @@ async def scan(req: ScanRequest) -> Dict[str, Any]:
         logger.info("Katana produced no output — activating Python fallback crawler")
         result["used_fallback"] = True
         try:
-            endpoints = await _fallback_crawl(target_url, timeout=min(req.timeout, 30))
+            endpoints = await _fallback_crawl(target_url, timeout=min(req.timeout, 30), auth_headers=req.auth_headers)
         except Exception as exc:
             logger.error("Fallback crawler failed: %s", exc)
             result["error"] = (

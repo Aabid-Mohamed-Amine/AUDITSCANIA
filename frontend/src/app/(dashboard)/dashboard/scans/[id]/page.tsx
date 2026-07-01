@@ -39,29 +39,51 @@ interface VulnFinding {
   payload?: string;
 }
 
+function _mapFinding(v: unknown, i: number, idPrefix: string): VulnFinding {
+  const vv      = v as Record<string, unknown>;
+  const sev     = String(vv.severity ?? "medium").toLowerCase();
+  const cveIds  = (vv.cve_ids as string[] | undefined) ?? [];
+  const cvssRaw = vv.cvss_score;
+  return {
+    id:          String(vv.id ?? `${idPrefix}-${i}`),
+    title:       String(vv.title ?? vv.name ?? vv.description ?? vv.type ?? "Finding"),
+    severity:    (["critical","high","medium","low"] as string[]).includes(sev)
+                   ? (sev as VulnFinding["severity"])
+                   : "medium",
+    description: (vv.description ?? vv.info) as string | undefined,
+    url:         (vv.url ?? vv.matched_at ?? vv.endpoint ?? vv.path ?? vv.file) as string | undefined,
+    evidence:    (vv.evidence ?? vv.payload ?? vv.match) as string | undefined,
+    cve:         (vv.cve ?? cveIds[0]) as string | undefined,
+    cvss_score:  cvssRaw != null ? Number(cvssRaw) : undefined,
+    type:        vv.type as string | undefined,
+    remediation: vv.remediation as string | string[] | undefined,
+    status:      (vv.status ?? vv.fp_status) as string | undefined,
+    confidence:  vv.confidence_score != null ? Number(vv.confidence_score) : undefined,
+    payload:     (vv.payload ?? vv.evidence ?? vv.match ?? vv.secret) as string | undefined,
+  };
+}
+
 function extractVulnerabilities(scan: Scan): VulnFinding[] {
-  const socReport = scan.soc_report as Record<string, unknown> | null;
-  if (!socReport) return [];
-  const vulns = (socReport.vulnerabilities ?? socReport.findings) as unknown[] | undefined;
-  if (!Array.isArray(vulns)) return [];
-  return vulns.slice(0, 20).map((v, i) => {
-    const vv = v as Record<string, unknown>;
-    const sev = (String(vv.severity ?? "medium")).toLowerCase() as VulnFinding["severity"];
-    return {
-      id:          String(vv.id ?? `vuln-${i}`),
-      title:       String(vv.title ?? vv.name ?? vv.type ?? "Finding"),
-      severity:    ["critical","high","medium","low"].includes(sev) ? sev : "medium",
-      description: vv.description as string | undefined,
-      url:         (vv.url ?? vv.endpoint ?? vv.path) as string | undefined,
-      evidence:    (vv.evidence ?? vv.payload) as string | undefined,
-      cve:         vv.cve as string | undefined,
-      cvss_score:  vv.cvss_score as number | undefined,
-      type:        vv.type as string | undefined,
-      remediation: vv.remediation as string | string[] | undefined,
-      status:      vv.status as string | undefined,
-      payload:     (vv.payload ?? vv.evidence) as string | undefined,
-    };
-  });
+  // correlated_findings now includes GitLeaks (added to correlator backend)
+  const corrData     = scan.correlated_data as Record<string, unknown> | null;
+  const corrFindings = corrData?.correlated_findings as unknown[] | undefined;
+
+  // Fallback: soc_report.top_findings (capped at 10, for older scans)
+  const socReport   = scan.soc_report as Record<string, unknown> | null;
+  const socFindings = (
+    socReport?.vulnerabilities ?? socReport?.findings ?? socReport?.top_findings
+  ) as unknown[] | undefined;
+
+  const source = Array.isArray(corrFindings) && corrFindings.length > 0
+    ? corrFindings
+    : (Array.isArray(socFindings) ? socFindings : []);
+
+  if (source.length === 0) return [];
+
+  const SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+  return source
+    .map((v, i) => _mapFinding(v, i, "corr"))
+    .sort((a, b) => (SEV_RANK[b.severity] ?? 0) - (SEV_RANK[a.severity] ?? 0));
 }
 
 const PIPELINE_PHASES = [
@@ -125,6 +147,8 @@ export default function ScanDetailPage({ params }: PageProps) {
 
   const socReport    = scan.soc_report as Record<string, unknown> | null;
   const vulns        = extractVulnerabilities(scan);
+
+  // Count from the actual post-FP filtered findings (by_severity is pre-dedup, stale)
   const criticalCount = vulns.filter((v) => v.severity === "critical").length;
   const highCount     = vulns.filter((v) => v.severity === "high").length;
   const mediumCount   = vulns.filter((v) => v.severity === "medium").length;
@@ -555,11 +579,11 @@ export default function ScanDetailPage({ params }: PageProps) {
                       </div>
                       {/* CVSS + status */}
                       <div className="flex items-center gap-6 pr-2 shrink-0">
-                        {vuln.cvss_score !== undefined && (
+                        {vuln.cvss_score != null && (
                           <div className="text-center">
                             <div className="font-mono uppercase" style={{ fontSize: 9, color: "var(--sc-outline)" }}>CVSS</div>
                             <div className="font-bold font-mono" style={{ fontSize: 18, color: cfg.color }}>
-                              {vuln.cvss_score.toFixed(1)}
+                              {Number(vuln.cvss_score).toFixed(1)}
                             </div>
                           </div>
                         )}
@@ -680,8 +704,8 @@ export default function ScanDetailPage({ params }: PageProps) {
           </div>
         )}
 
-        {/* Existing ScanResults when completed but no structured vulns extracted */}
-        {isCompleted && vulns.length === 0 && (
+        {/* Detailed tool results — always shown when scan is complete */}
+        {isCompleted && (
           <div
             className="rounded-xl p-5 mb-4"
             style={{ background: "#ffffff", border: "1px solid var(--sc-border)" }}
@@ -691,7 +715,7 @@ export default function ScanDetailPage({ params }: PageProps) {
                 verified
               </span>
               <h2 className="font-semibold uppercase tracking-widest" style={{ fontSize: 11, color: "var(--sc-on-v)" }}>
-                {isCompleted ? "Reconnaissance Findings" : "Partial Results"}
+                Detailed Findings
               </h2>
             </div>
             <ScanResults scan={scan} />
